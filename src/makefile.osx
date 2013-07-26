@@ -71,7 +71,9 @@ OBJS= \
     obj/rpc.o \
     obj/script.o \
     obj/util.o \
-    obj/wallet.o
+    obj/wallet.o \
+    cryptopp/obj/sha.o \
+    cryptopp/obj/cpu.o
 
 ifdef USE_UPNP
 	LIBS += $(DEPSDIR)/lib/libminiupnpc.a

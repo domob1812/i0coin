@@ -1,5 +1,5 @@
 ---
-name: "i0coin"
+name: "bitcoin"
 suites:
 - "lucid"
 architectures:
@@ -10,11 +10,10 @@ packages:
 - "unzip"
 - "nsis"
 - "faketime"
-- "wine"
 reference_datetime: "2011-01-30 00:00:00"
 remotes:
-- "url": "git://github.com/kr105rlz/i0coin.git"
-  "dir": "i0coin"
+- "url": "https://github.com/bitcoin/bitcoin.git"
+  "dir": "bitcoin"
 files:
 - "wxwidgets-win32-2.9.2-gitian.zip"
 - "boost-win32-1.47.0-gitian.zip"
@@ -70,7 +69,7 @@ script: |
   cd ..
   mv miniupnpc-1.6 miniupnpc
   #
-  cd i0coin
+  cd bitcoin
   mkdir -p $OUTDIR/src
   cp -a . $OUTDIR/src
   rm -rf $OUTDIR/src/.git
@@ -82,11 +81,11 @@ script: |
   export LD_PRELOAD=/usr/lib/faketime/libfaketime.so.1
   export FAKETIME=$REFERENCE_DATETIME
   export TZ=UTC
-  make -f makefile.linux-mingw $MAKEOPTS DEPSDIR=$HOME/build i0coin.exe USE_UPNP=1
-  make -f makefile.linux-mingw $MAKEOPTS DEPSDIR=$HOME/build i0coind.exe USE_UPNP=0
-  i586-mingw32msvc-strip i0coin.exe
-  i586-mingw32msvc-strip i0coind.exe
+  make -f makefile.linux-mingw $MAKEOPTS DEPSDIR=$HOME/build bitcoin.exe USE_UPNP=1
+  make -f makefile.linux-mingw $MAKEOPTS DEPSDIR=$HOME/build bitcoind.exe USE_UPNP=0
+  i586-mingw32msvc-strip bitcoin.exe
+  i586-mingw32msvc-strip bitcoind.exe
   makensis ../share/setup.nsi
-  cp i0coin.exe ../share/i0coin-*-win32-setup.exe $OUTDIR/
+  cp bitcoin.exe ../share/bitcoin-*-win32-setup.exe $OUTDIR/
   mkdir $OUTDIR/daemon
-  cp i0coind.exe $OUTDIR/daemon
+  cp bitcoind.exe $OUTDIR/daemon

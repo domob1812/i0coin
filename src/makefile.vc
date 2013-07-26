@@ -81,7 +81,13 @@ OBJS= \
     obj\protocol.o \
     obj\script.o \
     obj\util.o \
-    obj\wallet.o
+    obj\wallet.o \
+    cryptopp\obj\sha.o \
+    cryptopp\obj\cpu.o
+
+CRYPTOPP_OBJS= \
+    cryptopp\obj\sha.obj \
+    cryptopp\obj\cpu.obj
 
 RC=../share
 
