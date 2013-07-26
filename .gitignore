@@ -3,3 +3,9 @@ src/i0coin
 src/i0coind
 .*.swp
 *.*~*
+*.bak
+*.rej
+*.orig
+*.o
+*.patch
+.bitcoin
