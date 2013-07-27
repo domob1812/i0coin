@@ -76,6 +76,9 @@ err:
     return(ok);
 }
 
+// Perform ECDSA key recovery (see SEC1 4.1.6) for curves over (mod p)-fields
+// recid selects which key is recovered
+// if check is nonzero, additional checks are performed
 int static inline ECDSA_SIG_recover_key_GFp(EC_KEY *eckey, ECDSA_SIG *ecsig, const unsigned char *msg, int msglen, int recid, int check)
 {
     if (!eckey) return 0;
@@ -295,6 +298,9 @@ public:
     }
 
     // create a compact signature (65 bytes), which allows reconstructing the used public key
+    // The format is one header byte, followed by two times 32 bytes for the serialized r and s values.
+    // The header byte: 0x1B = first key with even y, 0x1C = first key with odd y,
+    //                  0x1D = second key with even y, 0x1E = second key with odd y
     bool SignCompact(uint256 hash, std::vector<unsigned char>& vchSig)
     {
         bool fOk = false;
@@ -321,7 +327,7 @@ public:
             }
 
             if (nRecId == -1)
-                throw key_error("CKEy::SignCompact() : unable to construct recoverable key");
+                throw key_error("CKey::SignCompact() : unable to construct recoverable key");
 
             vchSig[0] = nRecId+27;
             BN_bn2bin(sig->r,&vchSig[33-(nBitsR+7)/8]);
@@ -333,6 +339,9 @@ public:
     }
 
     // reconstruct public key from a compact signature
+    // This is only slightly more CPU intensive than just verifying it.
+    // If this function succeeds, the recovered public key is guaranteed to be valid
+    // (the signature is a valid signature of the given data for that key)
     bool SetCompactSignature(uint256 hash, const std::vector<unsigned char>& vchSig)
     {
         if (vchSig.size() != 65)
@@ -362,6 +371,7 @@ public:
         return true;
     }
 
+    // Verify a compact signature
     bool VerifyCompact(uint256 hash, const std::vector<unsigned char>& vchSig)
     {
         CKey key;
@@ -372,6 +382,7 @@ public:
         return true;
     }
 
+    // Get the address corresponding to this key
     CBitcoinAddress GetAddress() const
     {
         return CBitcoinAddress(GetPubKey());

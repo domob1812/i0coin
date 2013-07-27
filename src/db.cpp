@@ -29,21 +29,32 @@ DbEnv dbenv(0);
 static map<string, int> mapFileUseCount;
 static map<string, Db*> mapDb;
 
-static void EnvShutdown()
+static void EnvShutdown(bool fRemoveLogFiles)
 {
     if (!fDbEnvInit)
         return;
 
     fDbEnvInit = false;
-    try
-    {
-        dbenv.close(0);
-    }
-    catch (const DbException& e)
-    {
-        printf("EnvShutdown exception: %s (%d)\n", e.what(), e.get_errno());
-    }
+    dbenv.close(0);
     DbEnv(0).remove(GetDataDir().c_str(), 0);
+
+    if (fRemoveLogFiles)
+    {
+        filesystem::path datadir(GetDataDir());
+        filesystem::directory_iterator it(datadir / "database");
+        while (it != filesystem::directory_iterator())
+        {
+            const filesystem::path& p = it->path();
+#if BOOST_FILESYSTEM_VERSION == 3
+            std::string f = p.filename().generic_string();
+#else
+            std::string f = p.filename();
+#endif
+            if (f.find("log.") == 0)
+                filesystem::remove(p);
+            ++it;
+        }
+    }
 }
 
 class CDBInit
@@ -54,7 +65,7 @@ public:
     }
     ~CDBInit()
     {
-        EnvShutdown();
+        EnvShutdown(false);
     }
 }
 instance_of_cdbinit;
@@ -220,10 +231,7 @@ bool CDB::Rewrite(const string& strFile, const char* pszSkip)
                             CDataStream ssValue;
                             int ret = db.ReadAtCursor(pcursor, ssKey, ssValue, DB_NEXT);
                             if (ret == DB_NOTFOUND)
-                            {
-                                pcursor->close();
                                 break;
-                            }
                             else if (ret != 0)
                             {
                                 pcursor->close();
@@ -247,12 +255,15 @@ bool CDB::Rewrite(const string& strFile, const char* pszSkip)
                         }
                     if (fSuccess)
                     {
-                        db.Close();
-                        CloseDb(strFile);
+                        Db* pdb = mapDb[strFile];
+                        if (pdb->close(0))
+                            fSuccess = false;
                         if (pdbCopy->close(0))
                             fSuccess = false;
+                        delete pdb;
                         delete pdbCopy;
-                    }
+                        mapDb[strFile] = NULL;
+                     }
                 }
                 if (fSuccess)
                 {
@@ -274,7 +285,7 @@ bool CDB::Rewrite(const string& strFile, const char* pszSkip)
 }
 
 
-void DBFlush(bool fShutdown)
+void DBFlush(bool fShutdown, bool fRemoveLogFiles)
 {
     // Flush log data to the actual data file
     //  on all files that are not in use
@@ -307,7 +318,7 @@ void DBFlush(bool fShutdown)
             if (mapFileUseCount.empty())
             {
                 dbenv.log_archive(&listp, DB_ARCH_REMOVE);
-                EnvShutdown();
+                EnvShutdown(fRemoveLogFiles);
             }
         }
     }

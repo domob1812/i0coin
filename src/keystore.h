@@ -14,6 +14,7 @@ protected:
     mutable CCriticalSection cs_KeyStore;
 
 public:
+    // Add a key to the store.
     virtual bool AddKey(const CKey& key) =0;
 
     // Check whether a key corresponding to a given address is present in the store.
