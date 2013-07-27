@@ -29,11 +29,6 @@ DbEnv dbenv(0);
 static map<string, int> mapFileUseCount;
 static map<string, Db*> mapDb;
 
-static bool fRemoveLogFiles = false;
-void RemoveLogFilesOnShutdown(bool fIn)
-{
-    fRemoveLogFiles = fIn;
-}
 static void EnvShutdown()
 {
     if (!fDbEnvInit)
@@ -49,24 +44,6 @@ static void EnvShutdown()
         printf("EnvShutdown exception: %s (%d)\n", e.what(), e.get_errno());
     }
     DbEnv(0).remove(GetDataDir().c_str(), 0);
-
-    if (fRemoveLogFiles)
-    {
-        filesystem::path datadir(GetDataDir());
-        filesystem::directory_iterator it(datadir / "database");
-        while (it != filesystem::directory_iterator())
-        {
-            const filesystem::path& p = it->path();
-#if BOOST_FILESYSTEM_VERSION >= 3
-            std::string f = p.filename().generic_string();
-#else
-            std::string f = p.filename();
-#endif
-            if (f.find("log.") == 0)
-                filesystem::remove(p);
-            ++it;
-        }
-    }
 }
 
 class CDBInit
@@ -238,7 +215,7 @@ bool CDB::Rewrite(const string& strFile, const char* pszSkip)
                     Dbc* pcursor = db.GetCursor();
                     if (pcursor)
                         while (fSuccess)
-			{
+                        {
                             CDataStream ssKey;
                             CDataStream ssValue;
                             int ret = db.ReadAtCursor(pcursor, ssKey, ssValue, DB_NEXT);
@@ -271,11 +248,11 @@ bool CDB::Rewrite(const string& strFile, const char* pszSkip)
                     if (fSuccess)
                     {
                         db.Close();
-			CloseDb(strFile);
+                        CloseDb(strFile);
                         if (pdbCopy->close(0))
                             fSuccess = false;
                         delete pdbCopy;
-                     }
+                    }
                 }
                 if (fSuccess)
                 {
