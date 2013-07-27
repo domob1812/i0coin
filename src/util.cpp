@@ -64,7 +64,7 @@ public:
             ppmutexOpenSSL[i] = new boost::interprocess::interprocess_mutex();
         CRYPTO_set_locking_callback(locking_callback);
 
-#ifdef __WXMSW__
+#ifdef WIN32
         // Seed random number generator with screen scrape and other hardware sources
         RAND_screen();
 #endif
@@ -108,7 +108,7 @@ void RandAddSeedPerfmon()
         return;
     nLastPerfmon = GetTime();
 
-#ifdef __WXMSW__
+#ifdef WIN32
     // Don't need this on Linux, OpenSSL automatically uses /dev/urandom
     // Seed with the entire set of perfmon data
     unsigned char pdata[250000];
@@ -198,7 +198,7 @@ inline int OutputDebugStringF(const char* pszFormat, ...)
         }
     }
 
-#ifdef __WXMSW__
+#ifdef WIN32
     if (fPrintToDebugger)
     {
         static CCriticalSection cs_OutputDebugStringF;
@@ -264,8 +264,7 @@ int my_snprintf(char* buffer, size_t limit, const char* format, ...)
     return ret;
 }
 
-
-string strprintf(const char* format, ...)
+string strprintf(const std::string &format, ...)
 {
     char buffer[50000];
     char* p = buffer;
@@ -275,7 +274,7 @@ string strprintf(const char* format, ...)
     {
         va_list arg_ptr;
         va_start(arg_ptr, format);
-        ret = _vsnprintf(p, limit, format, arg_ptr);
+        ret = _vsnprintf(p, limit, format.c_str(), arg_ptr);
         va_end(arg_ptr);
         if (ret >= 0 && ret < limit)
             break;
@@ -292,14 +291,13 @@ string strprintf(const char* format, ...)
     return str;
 }
 
-
-bool error(const char* format, ...)
+bool error(const std::string &format, ...)
 {
     char buffer[50000];
     int limit = sizeof(buffer);
     va_list arg_ptr;
     va_start(arg_ptr, format);
-    int ret = _vsnprintf(buffer, limit, format, arg_ptr);
+    int ret = _vsnprintf(buffer, limit, format.c_str(), arg_ptr);
     va_end(arg_ptr);
     if (ret < 0 || ret >= limit)
     {
@@ -459,7 +457,7 @@ void ParseParameters(int argc, char* argv[])
             pszValue = strchr(psz, '=');
             *pszValue++ = '\0';
         }
-        #ifdef __WXMSW__
+        #ifdef WIN32
         _strlwr(psz);
         if (psz[0] == '/')
             psz[0] = '-';
@@ -611,40 +609,6 @@ string DecodeBase64(const string& str)
     return string((const char*)&vchRet[0], vchRet.size());
 }
 
-const char* wxGetTranslation(const char* pszEnglish)
-{
-#ifdef GUI
-    // Wrapper of wxGetTranslation returning the same const char* type as was passed in
-    static CCriticalSection cs;
-    CRITICAL_BLOCK(cs)
-    {
-        // Look in cache
-        static map<string, char*> mapCache;
-        map<string, char*>::iterator mi = mapCache.find(pszEnglish);
-        if (mi != mapCache.end())
-            return (*mi).second;
-
-        // wxWidgets translation
-        wxString strTranslated = wxGetTranslation(wxString(pszEnglish, wxConvUTF8));
-
-        // We don't cache unknown strings because caller might be passing in a
-        // dynamic string and we would keep allocating memory for each variation.
-        if (strcmp(pszEnglish, strTranslated.utf8_str()) == 0)
-            return pszEnglish;
-
-        // Add to cache, memory doesn't need to be freed.  We only cache because
-        // we must pass back a pointer to permanently allocated memory.
-        char* pszCached = new char[strlen(strTranslated.utf8_str())+1];
-        strcpy(pszCached, strTranslated.utf8_str());
-        mapCache[pszEnglish] = pszCached;
-        return pszCached;
-    }
-    return NULL;
-#else
-    return pszEnglish;
-#endif
-}
-
 
 bool WildcardMatch(const char* psz, const char* mask)
 {
@@ -684,7 +648,7 @@ bool WildcardMatch(const string& str, const string& mask)
 
 void FormatException(char* pszMessage, std::exception* pex, const char* pszThread)
 {
-#ifdef __WXMSW__
+#ifdef WIN32
     char pszModule[MAX_PATH];
     pszModule[0] = '\0';
     GetModuleFileNameA(NULL, pszModule, sizeof(pszModule));
@@ -713,10 +677,6 @@ void PrintException(std::exception* pex, const char* pszThread)
     printf("\n\n************************\n%s\n", pszMessage);
     fprintf(stderr, "\n\n************************\n%s\n", pszMessage);
     strMiscWarning = pszMessage;
-#ifdef GUI
-    if (wxTheApp && !fDaemon)
-        MyMessageBox(pszMessage, "I0coin", wxOK | wxICON_ERROR);
-#endif
     throw;
 }
 
@@ -738,10 +698,6 @@ void PrintExceptionContinue(std::exception* pex, const char* pszThread)
     printf("\n\n************************\n%s\n", pszMessage);
     fprintf(stderr, "\n\n************************\n%s\n", pszMessage);
     strMiscWarning = pszMessage;
-#ifdef GUI
-    if (wxTheApp && !fDaemon)
-        boost::thread(boost::bind(ThreadOneMessageBox, string(pszMessage)));
-#endif
 }
 
 
@@ -751,7 +707,7 @@ void PrintExceptionContinue(std::exception* pex, const char* pszThread)
 
 
 
-#ifdef __WXMSW__
+#ifdef WIN32
 typedef WINSHELLAPI BOOL (WINAPI *PSHGETSPECIALFOLDERPATHA)(HWND hwndOwner, LPSTR lpszPath, int nFolder, BOOL fCreate);
 
 string MyGetSpecialFolderPath(int nFolder, bool fCreate)
@@ -792,7 +748,7 @@ string GetDefaultDataDir()
     // Windows: C:\Documents and Settings\username\Application Data\I0coin
     // Mac: ~/Library/Application Support/I0coin
     // Unix: ~/.i0coin
-#ifdef __WXMSW__
+#ifdef WIN32
     // Windows
     return MyGetSpecialFolderPath(CSIDL_APPDATA, true) + "\\I0coin";
 #else
@@ -802,7 +758,7 @@ string GetDefaultDataDir()
     string strHome = pszHome;
     if (strHome[strHome.size()-1] != '/')
         strHome += '/';
-#ifdef __WXMAC_OSX__
+#ifdef MAC_OSX
     // Mac
     strHome += "Library/Application Support/";
     filesystem::create_directory(strHome.c_str());
@@ -953,106 +909,25 @@ void ShrinkDebugFile()
 //  - Median of other nodes's clocks
 //  - The user (asking the user to fix the system clock if the first two disagree)
 //
-
-// NTP time functions taken from the public domain code here: http://blog.p-jansson.com/2010/03/ntp-client-using-boostasio.html
-time_t GetNTPTime( const char* ntpServer )
-{
-	using boost::asio::ip::udp;
-	boost::asio::io_service io_service;
-
-	udp::resolver resolver(io_service);
-	udp::resolver::query query(udp::v4(), ntpServer, "ntp");
-	udp::endpoint receiver_endpoint = *resolver.resolve(query);
-
-	udp::endpoint sender_endpoint;
-
-	boost::uint8_t data[48] = {
-		0x1B,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-		0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
-	};
-
-	udp::socket socket(io_service);
-	socket.open(udp::v4());
-
-	socket.send_to(
-			boost::asio::buffer(data),
-			receiver_endpoint);
-	 //ugly hack, CBA to switch to asio async I/O just to get a 3 sec timeout
-	 int hSocket = socket.native();
-	 fd_set fdset;
-	 FD_ZERO(&fdset);
-	 FD_SET(hSocket, &fdset);
-	 struct timeval t;
-	 t.tv_sec = 3;
-          t.tv_usec = 0;
-	 int n_readable = select(hSocket+1, &fdset, NULL, NULL, &t);
-          if (!n_readable)
-		 return time_t(0);
-	socket.receive_from(
-			boost::asio::buffer(data),
-			sender_endpoint);
-
-	typedef boost::uint32_t u32;
-	u32 iPart(
-			static_cast<u32>(data[40]) << 24
-			| static_cast<u32>(data[41]) << 16
-			| static_cast<u32>(data[42]) << 8
-			| static_cast<u32>(data[43])
-	);
-	u32 fPart(
-		static_cast<u32>(data[44]) << 24
-		| static_cast<u32>(data[45]) << 16
-		| static_cast<u32>(data[46]) << 8
-		| static_cast<u32>(data[47])
-	);
-
-	using namespace boost::posix_time;
-	ptime pt(
-			boost::gregorian::date(1900,1,1),
-			milliseconds(iPart * 1.0E3 + fPart * 1.0E3 / 0x100000000ULL )
-	);
-
-	// Convert ptime to epoch time_t
-	boost::posix_time::ptime epoch(boost::gregorian::date(1970,1,1));
-	time_duration::sec_type x = (pt - epoch).total_seconds();
-
-	return time_t(x);
-}
-time_t GetNTPTime()
-{
-	return GetNTPTime("pool.ntp.org");
-}
+static int64 nMockTime = 0;  // For unit testing
 
 int64 GetTime()
 {
+    if (nMockTime) return nMockTime;
+
     return time(NULL);
 }
 
-static int64 nTimeOffset		= 0;
-static int64 nTimeNTPOffset		= 0;
-static int64 nTimeNTPLastSync	= 0;
+void SetMockTime(int64 nMockTimeIn)
+{
+    nMockTime = nMockTimeIn;
+}
+
+static int64 nTimeOffset = 0;
 
 int64 GetAdjustedTime()
 {
-    //return GetTime() + nTimeOffset;
-	int64 time = GetTime();
-	
-	if((time - nTimeNTPLastSync) >= (60 * 5)) // Calculate the NTP offset once every 5 min
-	{
-		int64 ntpTime = GetNTPTime();	
-		nTimeNTPLastSync = time;
-		 if (ntpTime)
-		 {
-			 nTimeNTPOffset = ntpTime - time;
-			 printf("nTimeNTPOffset=%d\n",nTimeNTPOffset);
-		 }
-		 else
-		 {
-			 printf("NTP timeout\n");
-		 }
-	}
-	
-    return time + nTimeNTPOffset;
+    return GetTime() + nTimeOffset;
 }
 
 void AddTimeData(unsigned int ip, int64 nTime)

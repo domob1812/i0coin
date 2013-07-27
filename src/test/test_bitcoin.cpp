@@ -8,8 +8,11 @@
 #include "uint256_tests.cpp"
 #include "script_tests.cpp"
 #include "transaction_tests.cpp"
-#include "miner_tests.cpp"
+#include "DoS_tests.cpp"
+#include "base64_tests.cpp"
+#include "util_tests.cpp"
 #include "base58_tests.cpp"
+#include "miner_tests.cpp"
 
 CWallet* pwalletMain;
 

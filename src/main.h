@@ -103,6 +103,7 @@ void FormatHashBuffers(CBlock* pblock, char* pmidstate, char* pdata, char* phash
 bool CheckWork(CBlock* pblock, CWallet& wallet, CReserveKey& reservekey);
 bool CheckProofOfWork(uint256 hash, unsigned int nBits);
 int GetTotalBlocksEstimate();
+int GetNumBlocksOfPeers();
 bool IsInitialBlockDownload();
 std::string GetWarnings(std::string strFor);
 
@@ -403,6 +404,9 @@ public:
     std::vector<CTxOut> vout;
     unsigned int nLockTime;
 
+    // Denial-of-service detection:
+    mutable int nDoS;
+    bool DoS(int nDoSIn, bool fIn) const { nDoS += nDoSIn; return fIn; }
 
     CTransaction()
     {
@@ -424,6 +428,7 @@ public:
         vin.clear();
         vout.clear();
         nLockTime = 0;
+        nDoS = 0;  // Denial-of-service prevention
     }
 
     bool IsNull() const
@@ -811,6 +816,9 @@ public:
     // memory only
     mutable std::vector<uint256> vMerkleTree;
 
+    // Denial-of-service detection:
+    mutable int nDoS;
+    bool DoS(int nDoSIn, bool fIn) const { nDoS += nDoSIn; return fIn; }
 
     CBlock()
     {
@@ -859,6 +867,8 @@ public:
     {
         return (int64)nTime;
     }
+
+    bool CheckProofOfWork(int nHeight) const;
 
     int GetSigOpCount() const
     {
@@ -941,7 +951,7 @@ public:
         fflush(fileout);
         if (!IsInitialBlockDownload() || (nBestHeight+1) % 500 == 0)
         {
-#ifdef __WXMSW__
+#ifdef WIN32
             _commit(_fileno(fileout));
 #else
             fsync(fileno(fileout));
@@ -950,8 +960,6 @@ public:
 
         return true;
     }
-
-    bool CheckProofOfWork(int nHeight) const;
 
     bool ReadFromDisk(unsigned int nFile, unsigned int nBlockPos, bool fReadTransactions=true)
     {
