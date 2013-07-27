@@ -11,6 +11,7 @@ class TransactionView;
 class OverviewPage;
 class AddressBookPage;
 class SendCoinsDialog;
+class MessagePage;
 class Notificator;
 
 QT_BEGIN_NAMESPACE
@@ -24,6 +25,10 @@ class QStackedWidget;
 class QUrl;
 QT_END_NAMESPACE
 
+/**
+  Bitcoin GUI main class. This class represents the main window of the Bitcoin UI. It communicates with both the client and
+  wallet models to give the user an up-to-date view of the current core state.
+*/
 class BitcoinGUI : public QMainWindow
 {
     Q_OBJECT
@@ -31,17 +36,16 @@ public:
     explicit BitcoinGUI(QWidget *parent = 0);
     ~BitcoinGUI();
 
+    /** Set the client model.
+        The client model represents the part of the core that communicates with the P2P network, and is wallet-agnostic.
+    */
     void setClientModel(ClientModel *clientModel);
+    /** Set the wallet model.
+        The wallet model represents a bitcoin wallet, and offers access to the list of transactions, address book and sending
+        functionality.
+    */
     void setWalletModel(WalletModel *walletModel);
     
-    /* Transaction table tab indices */
-    enum {
-        AllTransactions = 0,
-        SentReceived = 1,
-        Sent = 2,
-        Received = 3
-    } TabIndex;
-
 protected:
     void changeEvent(QEvent *e);
     void closeEvent(QCloseEvent *event);
@@ -59,6 +63,7 @@ private:
     AddressBookPage *addressBookPage;
     AddressBookPage *receiveCoinsPage;
     SendCoinsDialog *sendCoinsPage;
+    MessagePage *messagePage;
 
     QLabel *labelEncryptionIcon;
     QLabel *labelConnectionsIcon;
@@ -72,6 +77,7 @@ private:
     QAction *quitAction;
     QAction *sendCoinsAction;
     QAction *addressBookAction;
+    QAction *messageAction;
     QAction *aboutAction;
     QAction *receiveCoinsAction;
     QAction *optionsAction;
@@ -79,6 +85,7 @@ private:
     QAction *exportAction;
     QAction *encryptWalletAction;
     QAction *changePassphraseAction;
+    QAction *aboutQtAction;
 
     QSystemTrayIcon *trayIcon;
     Notificator *notificator;
@@ -86,41 +93,74 @@ private:
 
     QMovie *syncIconMovie;
 
+    /** Create the main UI actions. */
     void createActions();
+    /** Create the menu bar and submenus. */
     void createMenuBar();
+    /** Create the toolbars */
     void createToolBars();
-    QWidget *createTabs();
+    /** Create system tray (notification) icon */
     void createTrayIcon();
 
 public slots:
+    /** Set number of connections shown in the UI */
     void setNumConnections(int count);
+    /** Set number of blocks shown in the UI */
     void setNumBlocks(int count);
+    /** Set the encryption status as shown in the UI.
+       @param[in] status            current encryption status
+       @see WalletModel::EncryptionStatus
+    */
     void setEncryptionStatus(int status);
+    /** Set the status bar text if there are any warnings (removes sync progress bar if applicable) */
+    void refreshStatusBar();
 
+    /** Notify the user of an error in the network or transaction handling code. */
     void error(const QString &title, const QString &message);
-    /* It is currently not possible to pass a return value to another thread through
-       BlockingQueuedConnection, so use an indirected pointer.
+    /** Asks the user whether to pay the transaction fee or to cancel the transaction.
+       It is currently not possible to pass a return value to another thread through
+       BlockingQueuedConnection, so an indirected pointer is used.
        http://bugreports.qt.nokia.com/browse/QTBUG-10440
+
+      @param[in] nFeeRequired       the required fee
+      @param[out] payFee            true to pay the fee, false to not pay the fee
     */
     void askFee(qint64 nFeeRequired, bool *payFee);
+    void handleURL(QString strURL);
+
+    void gotoMessagePage();
+    void gotoMessagePage(QString);
 
 private slots:
-    // UI pages
+    /** Switch to overview (home) page */
     void gotoOverviewPage();
+    /** Switch to history (transactions) page */
     void gotoHistoryPage();
+    /** Switch to address book page */
     void gotoAddressBookPage();
+    /** Switch to receive coins page */
     void gotoReceiveCoinsPage();
+    /** Switch to send coins page */
     void gotoSendCoinsPage();
 
-    // Misc actions
+    /** Show configuration dialog */
     void optionsClicked();
+    /** Show about dialog */
     void aboutClicked();
 #ifndef Q_WS_MAC
+    /** Handle tray icon clicked */
     void trayIconActivated(QSystemTrayIcon::ActivationReason reason);
 #endif
+    /** Show incoming transaction notification for new transactions.
+
+        The new items are those between start and end inclusive, under the given parent item.
+    */
     void incomingTransaction(const QModelIndex & parent, int start, int end);
+    /** Encrypt the wallet */
     void encryptWallet(bool status);
+    /** Change encrypted wallet passphrase */
     void changePassphrase();
+    /** Ask for pass phrase to unlock wallet temporarily */
     void unlockWallet();
 };
 
