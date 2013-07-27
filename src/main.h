@@ -28,7 +28,7 @@ class CRequestTracker;
 class CNode;
 class CAuxPow;
 
-static const int CLIENT_VERSION = 60000;
+static const int CLIENT_VERSION = 60003;
 static const bool VERSION_IS_BETA = true;
 extern const std::string CLIENT_NAME;
 
@@ -1074,6 +1074,9 @@ public:
     bool AddToBlockIndex(unsigned int nFile, unsigned int nBlockPos);
     bool CheckBlock(int nHeight) const;
     bool AcceptBlock();
+
+private:
+    bool SetBestChainInner(CTxDB& txdb, CBlockIndex *pindexNew);
 };
 
 
