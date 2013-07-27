@@ -1,49 +1,62 @@
 # Copyright (c) 2009-2010 Satoshi Nakamoto
 # Distributed under the MIT/X11 software license, see the accompanying
-# file license.txt or http://www.opensource.org/licenses/mit-license.php.
+# file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 DEPSDIR:=/usr/i586-mingw32msvc
 
 USE_UPNP:=0
+USE_IPV6:=1
 
 INCLUDEPATHS= \
- -I"$(DEPSDIR)/boost_1_47_0" \
+ -I"$(CURDIR)" \
+ -I"$(CURDIR)"/obj \
+ -I"$(DEPSDIR)/boost_1_50_0" \
  -I"$(DEPSDIR)/db-4.8.30.NC/build_unix" \
- -I"$(DEPSDIR)/openssl-1.0.0e/include" \
+ -I"$(DEPSDIR)/openssl-1.0.1b/include" \
  -I"$(DEPSDIR)"
 
 LIBPATHS= \
- -L"$(DEPSDIR)/boost_1_47_0/stage/lib" \
+ -L"$(DEPSDIR)/boost_1_50_0/stage/lib" \
  -L"$(DEPSDIR)/db-4.8.30.NC/build_unix" \
- -L"$(DEPSDIR)/openssl-1.0.0e"
+ -L"$(DEPSDIR)/openssl-1.0.1b"
 
 LIBS= \
  -l boost_system-mt-s \
  -l boost_filesystem-mt-s \
  -l boost_program_options-mt-s \
  -l boost_thread_win32-mt-s \
+ -l boost_chrono-mt-s \
  -l db_cxx \
  -l ssl \
  -l crypto
 
-DEFS=-D_MT -DWIN32 -D_WINDOWS -DNOPCH -DUSE_SSL -DBOOST_THREAD_USE_LIB
+DEFS=-D_MT -DWIN32 -D_WINDOWS -DBOOST_THREAD_USE_LIB -DBOOST_SPIRIT_THREADSAFE
 DEBUGFLAGS=-g
-CFLAGS=-O2 -w -Wno-invalid-offsetof -Wformat $(DEBUGFLAGS) $(DEFS) $(INCLUDEPATHS)
+CFLAGS=-O2 -w -Wall -Wextra -Wformat -Wformat-security -Wno-unused-parameter $(DEBUGFLAGS) $(DEFS) $(INCLUDEPATHS)
 
+TESTDEFS = -DTEST_DATA_DIR=$(abspath test/data)
 
-ifdef USE_UPNP
+ifndef USE_UPNP
+	override USE_UPNP = -
+endif
+ifneq (${USE_UPNP}, -)
 	LIBPATHS += -L"$(DEPSDIR)/miniupnpc"
 	LIBS += -l miniupnpc -l iphlpapi
 	DEFS += -DSTATICLIB -DUSE_UPNP=$(USE_UPNP)
 endif
 
-LIBS += -l mingwthrd -l kernel32 -l user32 -l gdi32 -l comdlg32 -l winspool -l winmm -l shell32 -l comctl32 -l ole32 -l oleaut32 -l uuid -l rpcrt4 -l advapi32 -l ws2_32 -l shlwapi
+ifneq (${USE_IPV6}, -)
+	DEFS += -DUSE_IPV6=$(USE_IPV6)
+endif
+
+LIBS += -l mingwthrd -l kernel32 -l user32 -l gdi32 -l comdlg32 -l winspool -l winmm -l shell32 -l comctl32 -l ole32 -l oleaut32 -l uuid -l rpcrt4 -l advapi32 -l ws2_32 -l mswsock -l shlwapi
 
 # TODO: make the mingw builds smarter about dependencies, like the linux/osx builds are
 HEADERS = $(wildcard *.h)
 
 OBJS= \
     obj/auxwork,o \
+    obj/version.o \
     obj/checkpoints.o \
     obj/netbase.o \
     obj/addrman.o \
@@ -58,11 +71,24 @@ OBJS= \
     obj/protocol.o \
     obj/bitcoinrpc.o \
     obj/rpcdump.o \
+    obj/rpcnet.o \
+    obj/rpcmining.o \
+    obj/rpcwallet.o \
+    obj/rpcblockchain.o \
+    obj/rpcrawtransaction.o \
     obj/script.o \
+    obj/sync.o \
     obj/util.o \
-    obj/wallet.o
+    obj/wallet.o \
+    obj/walletdb.o \
+    obj/noui.o
 
 all: i0coin.exe
+
+obj/build.h: FORCE
+	/bin/sh ../share/genbuild.sh obj/build.h
+version.cpp: obj/build.h
+DEFS += -DHAVE_BUILD_INFO
 
 obj/%.o: %.cpp $(HEADERS)
 	i586-mingw32msvc-g++ -c $(CFLAGS) -o $@ $<
@@ -70,18 +96,20 @@ obj/%.o: %.cpp $(HEADERS)
 i0coind.exe: $(OBJS:obj/%=obj/%)
 	i586-mingw32msvc-g++ $(CFLAGS) -o $@ $(LIBPATHS) $^ $(LIBS)
 
+TESTOBJS := $(patsubst test/%.cpp,obj-test/%.o,$(wildcard test/*.cpp))
 
-obj/test/%.o: obj/test/%.cpp $(HEADERS)
-	i586-mingw32msvc-g++ -c $(CFLAGS) -o $@ $<
+obj-test/%.o: test/%.cpp $(HEADERS)
+	i586-mingw32msvc-g++ -c $(TESTDEFS) $(CFLAGS) -o $@ $<
 
-test_i0coin.exe: obj/test/test_i0coin.o $(filter-out obj/init.o,$(OBJS:obj/%=obj/%))
-	i586-mingw32msvc-g++ $(CFLAGS) -o $@ $(LIBPATHS) $^ $(LIBS) -lboost_unit_test_framework-mt-s
+test_i0coin.exe: $(TESTOBJS) $(filter-out obj/init.o,$(OBJS:obj/%=obj/%))
+	i586-mingw32msvc-g++ $(CFLAGS) -o $@ $(LIBPATHS) $^ -lboost_unit_test_framework-mt-s $(LIBS)
 
 
 clean:
 	-rm -f obj/*.o
-	-rm -f obj/test/*.o
-	-rm -f test/*.o
-	-rm -f headers.h.gch
 	-rm -f i0coind.exe
+	-rm -f obj-test/*.o
 	-rm -f test_i0coin.exe
+	-rm -f src/build.h
+
+FORCE:

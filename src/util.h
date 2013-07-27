@@ -1,7 +1,7 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
 // Copyright (c) 2009-2012 The Bitcoin developers
 // Distributed under the MIT/X11 software license, see the accompanying
-// file license.txt or http://www.opensource.org/licenses/mit-license.php.
+// file COPYING or http://www.opensource.org/licenses/mit-license.php.
 #ifndef BITCOIN_UTIL_H
 #define BITCOIN_UTIL_H
 
@@ -11,13 +11,16 @@
 #include <sys/types.h>
 #include <sys/time.h>
 #include <sys/resource.h>
+#else
+typedef int pid_t; /* define for Windows compatibility */
 #endif
 #include <map>
 #include <vector>
 #include <string>
 
 #include <boost/thread.hpp>
-#include <boost/interprocess/sync/interprocess_recursive_mutex.hpp>
+#include <boost/filesystem.hpp>
+#include <boost/filesystem/path.hpp>
 #include <boost/date_time/gregorian/gregorian_types.hpp>
 #include <boost/date_time/posix_time/posix_time_types.hpp>
 #include <boost/date_time/posix_time/posix_time.hpp>
@@ -26,10 +29,13 @@
 #include <openssl/sha.h>
 #include <openssl/ripemd.h>
 
-#include "netbase.h"
+#include "netbase.h" // for AddTimeData
 
 typedef long long  int64;
 typedef unsigned long long  uint64;
+
+static const int64 COIN = 100000000;
+static const int64 CENT = 1000000;
 
 #define loop                for (;;)
 #define BEGIN(a)            ((char*)&(a))
@@ -38,11 +44,6 @@ typedef unsigned long long  uint64;
 #define UEND(a)             ((unsigned char*)&((&(a))[1]))
 #define ARRAYLEN(array)     (sizeof(array)/sizeof((array)[0]))
 #define printf              OutputDebugStringF
-
-#ifdef snprintf
-#undef snprintf
-#endif
-#define snprintf my_snprintf
 
 #ifndef PRI64d
 #if defined(_MSC_VER) || defined(__MSVCRT__)
@@ -95,13 +96,6 @@ inline void Sleep(int64 n)
 }
 #endif
 
-#if !defined(QT_GUI)
-inline const char* _(const char* psz)
-{
-    return psz;
-}
-#endif
-
 
 
 
@@ -113,9 +107,9 @@ inline const char* _(const char* psz)
 extern std::map<std::string, std::string> mapArgs;
 extern std::map<std::string, std::vector<std::string> > mapMultiArgs;
 extern bool fDebug;
+extern bool fDebugNet;
 extern bool fPrintToConsole;
 extern bool fPrintToDebugger;
-extern char pszSetDataDir[MAX_PATH];
 extern bool fRequestShutdown;
 extern bool fShutdown;
 extern bool fDaemon;
@@ -125,13 +119,22 @@ extern std::string strMiscWarning;
 extern bool fTestNet;
 extern bool fNoListen;
 extern bool fLogTimestamps;
+extern bool fReopenDebugLog;
 
 void RandAddSeed();
 void RandAddSeedPerfmon();
 int OutputDebugStringF(const char* pszFormat, ...);
 int my_snprintf(char* buffer, size_t limit, const char* format, ...);
-std::string strprintf(const std::string &format, ...);
-bool error(const std::string &format, ...);
+
+/* It is not allowed to use va_start with a pass-by-reference argument.
+   (C++ standard, 18.7, paragraph 3). Use a dummy argument to work around this, and use a
+   macro to keep similar semantics.
+*/
+std::string real_strprintf(const std::string &format, int dummy, ...);
+#define strprintf(format, ...) real_strprintf(format, 0, __VA_ARGS__)
+std::string vstrprintf(const std::string &format, va_list ap);
+
+bool error(const char *format, ...);
 void LogException(std::exception* pex, const char* pszThread);
 void PrintException(std::exception* pex, const char* pszThread);
 void PrintExceptionContinue(std::exception* pex, const char* pszThread);
@@ -146,125 +149,40 @@ std::vector<unsigned char> DecodeBase64(const char* p, bool* pfInvalid = NULL);
 std::string DecodeBase64(const std::string& str);
 std::string EncodeBase64(const unsigned char* pch, size_t len);
 std::string EncodeBase64(const std::string& str);
+std::vector<unsigned char> DecodeBase32(const char* p, bool* pfInvalid = NULL);
+std::string DecodeBase32(const std::string& str);
+std::string EncodeBase32(const unsigned char* pch, size_t len);
+std::string EncodeBase32(const std::string& str);
 void ParseParameters(int argc, const char*const argv[]);
 bool WildcardMatch(const char* psz, const char* mask);
 bool WildcardMatch(const std::string& str, const std::string& mask);
+void FileCommit(FILE *fileout);
 int GetFilesize(FILE* file);
-void GetDataDir(char* pszDirRet);
-std::string GetConfigFile();
-std::string GetPidFile();
-void CreatePidFile(std::string pidFile, pid_t pid);
-bool ReadConfigFile(std::map<std::string, std::string>& mapSettingsRet, std::map<std::string, std::vector<std::string> >& mapMultiSettingsRet);
+bool RenameOver(boost::filesystem::path src, boost::filesystem::path dest);
+boost::filesystem::path GetDefaultDataDir();
+const boost::filesystem::path &GetDataDir(bool fNetSpecific = true);
+boost::filesystem::path GetConfigFile();
+boost::filesystem::path GetPidFile();
+void CreatePidFile(const boost::filesystem::path &path, pid_t pid);
+void ReadConfigFile(std::map<std::string, std::string>& mapSettingsRet, std::map<std::string, std::vector<std::string> >& mapMultiSettingsRet);
 #ifdef WIN32
-std::string MyGetSpecialFolderPath(int nFolder, bool fCreate);
+boost::filesystem::path GetSpecialFolderPath(int nFolder, bool fCreate = true);
 #endif
-std::string GetDefaultDataDir();
-std::string GetDataDir();
 void ShrinkDebugFile();
 int GetRandInt(int nMax);
 uint64 GetRand(uint64 nMax);
+uint256 GetRandHash();
 int64 GetTime();
 void SetMockTime(int64 nMockTimeIn);
 int64 GetAdjustedTime();
 std::string FormatFullVersion();
 std::string FormatSubVersion(const std::string& name, int nClientVersion, const std::vector<std::string>& comments);
 void AddTimeData(const CNetAddr& ip, int64 nTime);
+void runCommand(std::string strCommand);
 
 
 
 
-
-
-
-
-
-
-
-
-/** Wrapper to automatically initialize mutex. */
-class CCriticalSection
-{
-protected:
-    boost::interprocess::interprocess_recursive_mutex mutex;
-public:
-    explicit CCriticalSection() { }
-    ~CCriticalSection() { }
-    void Enter(const char* pszName, const char* pszFile, int nLine);
-    void Leave();
-    bool TryEnter(const char* pszName, const char* pszFile, int nLine);
-};
-
-/** RAII object that acquires mutex. Needed for exception safety. */
-class CCriticalBlock
-{
-protected:
-    CCriticalSection* pcs;
-
-public:
-    CCriticalBlock(CCriticalSection& csIn, const char* pszName, const char* pszFile, int nLine)
-    {
-        pcs = &csIn;
-        pcs->Enter(pszName, pszFile, nLine);
-    }
-
-    operator bool() const
-    {
-        return true;
-    }
-
-    ~CCriticalBlock()
-    {
-        pcs->Leave();
-    }
-};
-
-#define CRITICAL_BLOCK(cs)     \
-    if (CCriticalBlock criticalblock = CCriticalBlock(cs, #cs, __FILE__, __LINE__))
-
-#define ENTER_CRITICAL_SECTION(cs) \
-    (cs).Enter(#cs, __FILE__, __LINE__)
-
-#define LEAVE_CRITICAL_SECTION(cs) \
-    (cs).Leave()
-
-/** RAII object that tries to acquire mutex. Needed for exception safety. */
-class CTryCriticalBlock
-{
-protected:
-    CCriticalSection* pcs;
-
-public:
-    CTryCriticalBlock(CCriticalSection& csIn, const char* pszName, const char* pszFile, int nLine)
-    {
-        pcs = (csIn.TryEnter(pszName, pszFile, nLine) ? &csIn : NULL);
-    }
-
-    operator bool() const
-    {
-        return Entered();
-    }
-
-    ~CTryCriticalBlock()
-    {
-        if (pcs)
-        {
-            pcs->Leave();
-        }
-    }
-    bool Entered() const { return pcs != NULL; }
-};
-
-#define TRY_CRITICAL_BLOCK(cs)     \
-    if (CTryCriticalBlock criticalblock = CTryCriticalBlock(cs, #cs, __FILE__, __LINE__))
-
-
-
-
-
-
-// This is exactly like std::string, but with a custom allocator.
-// (secure_allocator<> is defined in serialize.h)
-typedef std::basic_string<char, std::char_traits<char>, secure_allocator<char> > SecureString;
 
 
 
@@ -321,15 +239,20 @@ inline int64 abs64(int64 n)
 template<typename T>
 std::string HexStr(const T itbegin, const T itend, bool fSpaces=false)
 {
-    if (itbegin == itend)
-        return "";
-    const unsigned char* pbegin = (const unsigned char*)&itbegin[0];
-    const unsigned char* pend = pbegin + (itend - itbegin) * sizeof(itbegin[0]);
-    std::string str;
-    str.reserve((pend-pbegin) * (fSpaces ? 3 : 2));
-    for (const unsigned char* p = pbegin; p != pend; p++)
-        str += strprintf((fSpaces && p != pend-1 ? "%02x " : "%02x"), *p);
-    return str;
+    std::vector<char> rv;
+    static char hexmap[16] = { '0', '1', '2', '3', '4', '5', '6', '7',
+                               '8', '9', 'a', 'b', 'c', 'd', 'e', 'f' };
+    rv.reserve((itend-itbegin)*3);
+    for(T it = itbegin; it < itend; ++it)
+    {
+        unsigned char val = (unsigned char)(*it);
+        if(fSpaces && it != itbegin)
+            rv.push_back(' ');
+        rv.push_back(hexmap[val>>4]);
+        rv.push_back(hexmap[val&15]);
+    }
+
+    return std::string(rv.begin(), rv.end());
 }
 
 inline std::string HexStr(const std::vector<unsigned char>& vch, bool fSpaces=false)
@@ -356,7 +279,7 @@ inline int64 GetPerformanceCounter()
 #else
     timeval t;
     gettimeofday(&t, NULL);
-    nCounter = t.tv_sec * 1000000 + t.tv_usec;
+    nCounter = (int64) t.tv_sec * 1000000 + t.tv_usec;
 #endif
     return nCounter;
 }
@@ -470,6 +393,46 @@ inline uint256 Hash(const T1 pbegin, const T1 pend)
     return hash2;
 }
 
+class CHashWriter
+{
+private:
+    SHA256_CTX ctx;
+
+public:
+    int nType;
+    int nVersion;
+
+    void Init() {
+        SHA256_Init(&ctx);
+    }
+
+    CHashWriter(int nTypeIn, int nVersionIn) : nType(nTypeIn), nVersion(nVersionIn) {
+        Init();
+    }
+
+    CHashWriter& write(const char *pch, size_t size) {
+        SHA256_Update(&ctx, pch, size);
+        return (*this);
+    }
+
+    // invalidates the object
+    uint256 GetHash() {
+        uint256 hash1;
+        SHA256_Final((unsigned char*)&hash1, &ctx);
+        uint256 hash2;
+        SHA256((unsigned char*)&hash1, sizeof(hash1), (unsigned char*)&hash2);
+        return hash2;
+    }
+
+    template<typename T>
+    CHashWriter& operator<<(const T& obj) {
+        // Serialize to this stream
+        ::Serialize(*this, obj, nType, nVersion);
+        return (*this);
+    }
+};
+
+
 template<typename T1, typename T2>
 inline uint256 Hash(const T1 p1begin, const T1 p1end,
                     const T2 p2begin, const T2 p2end)
@@ -507,13 +470,9 @@ inline uint256 Hash(const T1 p1begin, const T1 p1end,
 template<typename T>
 uint256 SerializeHash(const T& obj, int nType=SER_GETHASH, int nVersion=PROTOCOL_VERSION)
 {
-    // Most of the time is spent allocating and deallocating CDataStream's
-    // buffer.  If this ever needs to be optimized further, make a CStaticStream
-    // class with its buffer on the stack.
-    CDataStream ss(nType, nVersion);
-    ss.reserve(10000);
+    CHashWriter ss(nType, nVersion);
     ss << obj;
-    return Hash(ss.begin(), ss.end());
+    return ss.GetHash();
 }
 
 inline uint160 Hash160(const std::vector<unsigned char>& vch)
@@ -534,9 +493,9 @@ template <typename T> class CMedianFilter
 private:
     std::vector<T> vValues;
     std::vector<T> vSorted;
-    int nSize;
+    unsigned int nSize;
 public:
-    CMedianFilter(int size, T initial_value):
+    CMedianFilter(unsigned int size, T initial_value):
         nSize(size)
     {
         vValues.reserve(size);
@@ -664,29 +623,7 @@ inline void ExitThread(size_t nExitCode)
 }
 #endif
 
-
-
-
-
-inline bool AffinityBugWorkaround(void(*pfn)(void*))
-{
-#ifdef WIN32
-    // Sometimes after a few hours affinity gets stuck on one processor
-    DWORD_PTR dwProcessAffinityMask = -1;
-    DWORD_PTR dwSystemAffinityMask = -1;
-    GetProcessAffinityMask(GetCurrentProcess(), &dwProcessAffinityMask, &dwSystemAffinityMask);
-    DWORD dwPrev1 = SetThreadAffinityMask(GetCurrentThread(), dwProcessAffinityMask);
-    DWORD dwPrev2 = SetThreadAffinityMask(GetCurrentThread(), dwProcessAffinityMask);
-    if (dwPrev2 != dwProcessAffinityMask)
-    {
-        printf("AffinityBugWorkaround() : SetThreadAffinityMask=%d, ProcessAffinityMask=%d, restarting thread\n", dwPrev2, dwProcessAffinityMask);
-        if (!CreateThread(pfn, NULL))
-            printf("Error: CreateThread() failed\n");
-        return true;
-    }
-#endif
-    return false;
-}
+void RenameThread(const char* name);
 
 inline uint32_t ByteReverse(uint32_t value)
 {

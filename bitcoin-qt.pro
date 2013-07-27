@@ -1,19 +1,19 @@
 TEMPLATE = app
-TARGET =
-VERSION = 0.6.0
+TARGET = bitcoin-qt
+VERSION = 0.7.0
 INCLUDEPATH += src src/json src/qt
-DEFINES += QT_GUI BOOST_THREAD_USE_LIB
+DEFINES += QT_GUI BOOST_THREAD_USE_LIB BOOST_SPIRIT_THREADSAFE
 CONFIG += no_include_pwd
 
-# for boost 1.37, add -mt to the boost libraries 
+# for boost 1.37, add -mt to the boost libraries
 # use: qmake BOOST_LIB_SUFFIX=-mt
 # for boost thread win32 with _win32 sufix
 # use: BOOST_THREAD_LIB_SUFFIX=_win32-...
 # or when linking against a specific BerkelyDB version: BDB_LIB_SUFFIX=-4.8
 
-# Dependency library locations can be customized with BOOST_INCLUDE_PATH, 
-#    BOOST_LIB_PATH, BDB_INCLUDE_PATH, BDB_LIB_PATH
-#    OPENSSL_INCLUDE_PATH and OPENSSL_LIB_PATH respectively
+# Dependency library locations can be customized with:
+#    BOOST_INCLUDE_PATH, BOOST_LIB_PATH, BDB_INCLUDE_PATH,
+#    BDB_LIB_PATH, OPENSSL_INCLUDE_PATH and OPENSSL_LIB_PATH respectively
 
 OBJECTS_DIR = build
 MOC_DIR = build
@@ -29,6 +29,9 @@ contains(RELEASE, 1) {
         LIBS += -Wl,-Bstatic
     }
 }
+
+# for extra security on Windows: enable ASLR and DEP via GCC linker flags
+win32:QMAKE_LFLAGS *= -Wl,--dynamicbase -Wl,--nxcompat
 
 # use: qmake "USE_QRCODE=1"
 # libqrencode (http://fukuchi.org/works/qrencode/index.en.html) must be installed for support
@@ -62,16 +65,22 @@ contains(USE_DBUS, 1) {
     QT += dbus
 }
 
-# use: qmake "USE_SSL=1"
-contains(USE_SSL, 1) {
-    message(Building with SSL support for RPC)
-    DEFINES += USE_SSL
-}
-
 # use: qmake "FIRST_CLASS_MESSAGING=1"
 contains(FIRST_CLASS_MESSAGING, 1) {
     message(Building with first-class messaging)
     DEFINES += FIRST_CLASS_MESSAGING
+}
+
+# use: qmake "USE_IPV6=1" ( enabled by default; default)
+#  or: qmake "USE_IPV6=0" (disabled by default)
+#  or: qmake "USE_IPV6=-" (not supported)
+contains(USE_IPV6, -) {
+	message(Building without IPv6 support)
+} else {
+	count(USE_IPV6, 0) {
+		USE_IPV6=1
+	}
+	DEFINES += USE_IPV6=$$USE_IPV6
 }
 
 contains(BITCOIN_NEED_QT_PLUGINS, 1) {
@@ -86,18 +95,27 @@ contains(BITCOIN_NEED_QT_PLUGINS, 1) {
     # do not enable this on windows, as it will result in a non-working executable!
 }
 
-# disable quite some warnings because bitcoin core "sins" a lot
-QMAKE_CXXFLAGS_WARN_ON = -fdiagnostics-show-option -Wall -Wno-strict-aliasing -Wno-invalid-offsetof -Wno-unused-variable -Wno-unused-parameter -Wno-sign-compare -Wno-char-subscripts  -Wno-unused-value -Wno-sequence-point -Wno-parentheses -Wno-unknown-pragmas -Wno-switch
+# regenerate src/build.h
+!windows|contains(USE_BUILD_INFO, 1) {
+    genbuild.depends = FORCE
+    genbuild.commands = cd $$PWD; /bin/sh share/genbuild.sh $$OUT_PWD/build/build.h
+    genbuild.target = $$OUT_PWD/build/build.h
+    PRE_TARGETDEPS += $$OUT_PWD/build/build.h
+    QMAKE_EXTRA_TARGETS += genbuild
+    DEFINES += HAVE_BUILD_INFO
+}
+
+QMAKE_CXXFLAGS_WARN_ON = -fdiagnostics-show-option -Wall -Wextra -Wformat -Wformat-security -Wno-unused-parameter
 
 # Input
-DEPENDPATH += src/qt src src json/include
+DEPENDPATH += src src/json src/qt
 HEADERS += src/qt/bitcoingui.h \
     src/qt/transactiontablemodel.h \
     src/qt/addresstablemodel.h \
     src/qt/optionsdialog.h \
     src/qt/sendcoinsdialog.h \
     src/qt/addressbookpage.h \
-    src/qt/messagepage.h \
+    src/qt/signverifymessagedialog.h \
     src/qt/aboutdialog.h \
     src/qt/editaddressdialog.h \
     src/qt/bitcoinaddressvalidator.h \
@@ -106,6 +124,7 @@ HEADERS += src/qt/bitcoingui.h \
     src/bignum.h \
     src/checkpoints.h \
     src/compat.h \
+    src/sync.h \
     src/util.h \
     src/uint256.h \
     src/serialize.h \
@@ -114,10 +133,9 @@ HEADERS += src/qt/bitcoingui.h \
     src/net.h \
     src/key.h \
     src/db.h \
+    src/walletdb.h \
     src/script.h \
-    src/noui.h \
     src/init.h \
-    src/headers.h \
     src/irc.h \
     src/mruset.h \
     src/json/json_spirit_writer_template.h \
@@ -135,7 +153,6 @@ HEADERS += src/qt/bitcoingui.h \
     src/qt/guiconstants.h \
     src/qt/optionsmodel.h \
     src/qt/monitoreddatamapper.h \
-    src/qtui.h \
     src/qt/transactiondesc.h \
     src/qt/transactiondescdialog.h \
     src/qt/bitcoinamountfield.h \
@@ -155,7 +172,11 @@ HEADERS += src/qt/bitcoingui.h \
     src/qt/askpassphrasedialog.h \
     src/protocol.h \
     src/qt/notificator.h \
-    src/qt/qtipcserver.h
+    src/qt/qtipcserver.h \
+    src/allocators.h \
+    src/ui_interface.h \
+    src/qt/rpcconsole.h \
+    src/version.h
 
 SOURCES += src/qt/bitcoin.cpp src/qt/bitcoingui.cpp \
     src/qt/transactiontablemodel.cpp \
@@ -163,10 +184,12 @@ SOURCES += src/qt/bitcoin.cpp src/qt/bitcoingui.cpp \
     src/qt/optionsdialog.cpp \
     src/qt/sendcoinsdialog.cpp \
     src/qt/addressbookpage.cpp \
-    src/qt/messagepage.cpp \
+    src/qt/signverifymessagedialog.cpp \
     src/qt/aboutdialog.cpp \
     src/qt/editaddressdialog.cpp \
     src/qt/bitcoinaddressvalidator.cpp \
+    src/version.cpp \
+    src/sync.cpp \
     src/util.cpp \
     src/netbase.cpp \
     src/key.cpp \
@@ -178,6 +201,7 @@ SOURCES += src/qt/bitcoin.cpp src/qt/bitcoingui.cpp \
     src/checkpoints.cpp \
     src/addrman.cpp \
     src/db.cpp \
+    src/walletdb.cpp \
     src/json/json_spirit_writer.cpp \
     src/json/json_spirit_value.cpp \
     src/json/json_spirit_reader.cpp \
@@ -197,6 +221,11 @@ SOURCES += src/qt/bitcoin.cpp src/qt/bitcoingui.cpp \
     src/qt/walletmodel.cpp \
     src/bitcoinrpc.cpp \
     src/rpcdump.cpp \
+    src/rpcnet.cpp \
+    src/rpcmining.cpp \
+    src/rpcwallet.cpp \
+    src/rpcblockchain.cpp \
+    src/rpcrawtransaction.cpp \
     src/qt/overviewpage.cpp \
     src/qt/csvmodelwriter.cpp \
     src/crypter.cpp \
@@ -207,7 +236,9 @@ SOURCES += src/qt/bitcoin.cpp src/qt/bitcoingui.cpp \
     src/qt/askpassphrasedialog.cpp \
     src/protocol.cpp \
     src/qt/notificator.cpp \
-    src/qt/qtipcserver.cpp
+    src/qt/qtipcserver.cpp \
+    src/qt/rpcconsole.cpp \
+    src/noui.cpp
 
 RESOURCES += \
     src/qt/bitcoin.qrc
@@ -215,13 +246,15 @@ RESOURCES += \
 FORMS += \
     src/qt/forms/sendcoinsdialog.ui \
     src/qt/forms/addressbookpage.ui \
-    src/qt/forms/messagepage.ui \
+    src/qt/forms/signverifymessagedialog.ui \
     src/qt/forms/aboutdialog.ui \
     src/qt/forms/editaddressdialog.ui \
     src/qt/forms/transactiondescdialog.ui \
     src/qt/forms/overviewpage.ui \
     src/qt/forms/sendcoinsentry.ui \
-    src/qt/forms/askpassphrasedialog.ui
+    src/qt/forms/askpassphrasedialog.ui \
+    src/qt/forms/rpcconsole.ui \
+    src/qt/forms/optionsdialog.ui
 
 contains(USE_QRCODE, 1) {
 HEADERS += src/qt/qrcodedialog.h
@@ -231,8 +264,8 @@ FORMS += src/qt/forms/qrcodedialog.ui
 
 contains(BITCOIN_QT_TEST, 1) {
 SOURCES += src/qt/test/test_main.cpp \
-    src/qt/test/urltests.cpp
-HEADERS += src/qt/test/urltests.h
+    src/qt/test/uritests.cpp
+HEADERS += src/qt/test/uritests.h
 DEPENDPATH += src/qt/test
 QT += testlib
 TARGET = bitcoin-qt_test
@@ -249,24 +282,23 @@ isEmpty(QMAKE_LRELEASE) {
     win32:QMAKE_LRELEASE = $$[QT_INSTALL_BINS]\\lrelease.exe
     else:QMAKE_LRELEASE = $$[QT_INSTALL_BINS]/lrelease
 }
-isEmpty(TS_DIR):TS_DIR = src/qt/locale
+isEmpty(QM_DIR):QM_DIR = $$PWD/src/qt/locale
 # automatically build translations, so they can be included in resource file
 TSQM.name = lrelease ${QMAKE_FILE_IN}
 TSQM.input = TRANSLATIONS
-TSQM.output = $$TS_DIR/${QMAKE_FILE_BASE}.qm
-TSQM.commands = $$QMAKE_LRELEASE ${QMAKE_FILE_IN}
+TSQM.output = $$QM_DIR/${QMAKE_FILE_BASE}.qm
+TSQM.commands = $$QMAKE_LRELEASE ${QMAKE_FILE_IN} -qm ${QMAKE_FILE_OUT}
 TSQM.CONFIG = no_link
 QMAKE_EXTRA_COMPILERS += TSQM
-PRE_TARGETDEPS += compiler_TSQM_make_all
 
 # "Other files" to show in Qt Creator
 OTHER_FILES += \
-    doc/*.rst doc/*.txt doc/README README.md
+    doc/*.rst doc/*.txt doc/README README.md res/bitcoin-qt.rc src/test/*.cpp src/test/*.h src/qt/test/*.cpp src/qt/test/*.h
 
 # platform specific defaults, if not overridden on command line
 isEmpty(BOOST_LIB_SUFFIX) {
     macx:BOOST_LIB_SUFFIX = -mt
-    windows:BOOST_LIB_SUFFIX = -mgw44-mt-1_43
+    windows:BOOST_LIB_SUFFIX = -mgw44-mt-s-1_50
 }
 
 isEmpty(BOOST_THREAD_LIB_SUFFIX) {
@@ -293,7 +325,7 @@ isEmpty(BOOST_INCLUDE_PATH) {
     macx:BOOST_INCLUDE_PATH = /opt/local/include
 }
 
-windows:LIBS += -lws2_32 -lshlwapi
+windows:LIBS += -lws2_32 -lshlwapi -lmswsock
 windows:DEFINES += WIN32
 windows:RC_FILE = src/qt/res/bitcoin-qt.rc
 
@@ -327,6 +359,7 @@ LIBS += -lssl -lcrypto -ldb_cxx$$BDB_LIB_SUFFIX
 # -lgdi32 has to happen after -lcrypto (see  #681)
 windows:LIBS += -lole32 -luuid -lgdi32
 LIBS += -lboost_system$$BOOST_LIB_SUFFIX -lboost_filesystem$$BOOST_LIB_SUFFIX -lboost_program_options$$BOOST_LIB_SUFFIX -lboost_thread$$BOOST_THREAD_LIB_SUFFIX
+windows:LIBS += -lboost_chrono$$BOOST_LIB_SUFFIX
 
 contains(RELEASE, 1) {
     !windows:!macx {

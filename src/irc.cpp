@@ -1,18 +1,17 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
 // Copyright (c) 2009-2012 The Bitcoin developers
 // Distributed under the MIT/X11 software license, see the accompanying
-// file license.txt or http://www.opensource.org/licenses/mit-license.php.
+// file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
-#include "headers.h"
 #include "irc.h"
 #include "net.h"
 #include "strlcpy.h"
+#include "base58.h"
 
 using namespace std;
 using namespace boost;
 
 int nGotIRCAddresses = 0;
-bool fGotExternalIP = false;
 
 void ThreadIRCSeed2(void* parg);
 
@@ -108,13 +107,13 @@ int RecvUntil(SOCKET hSocket, const char* psz1, const char* psz2=NULL, const cha
         if (!RecvLineIRC(hSocket, strLine))
             return 0;
         printf("IRC %s\n", strLine.c_str());
-        if (psz1 && strLine.find(psz1) != -1)
+        if (psz1 && strLine.find(psz1) != string::npos)
             return 1;
-        if (psz2 && strLine.find(psz2) != -1)
+        if (psz2 && strLine.find(psz2) != string::npos)
             return 2;
-        if (psz3 && strLine.find(psz3) != -1)
+        if (psz3 && strLine.find(psz3) != string::npos)
             return 3;
-        if (psz4 && strLine.find(psz4) != -1)
+        if (psz4 && strLine.find(psz4) != string::npos)
             return 4;
     }
 }
@@ -177,8 +176,6 @@ bool GetIPFromIRC(SOCKET hSocket, string strMyName, CNetAddr& ipRet)
     // Hybrid IRC used by lfnet always returns IP when you userhost yourself,
     // but in case another IRC is ever used this should work.
     printf("GetIPFromIRC() got userhost %s\n", strHost.c_str());
-    if (fUseProxy)
-        return false;
     CNetAddr addr(strHost, true);
     if (!addr.IsValid())
         return false;
@@ -192,6 +189,10 @@ bool GetIPFromIRC(SOCKET hSocket, string strMyName, CNetAddr& ipRet)
 void ThreadIRCSeed(void* parg)
 {
     IMPLEMENT_RANDOMIZE_STACK(ThreadIRCSeed(parg));
+
+    // Make this thread recognisable as the IRC seeding thread
+    RenameThread("bitcoin-ircseed");
+
     try
     {
         ThreadIRCSeed2(parg);
@@ -201,12 +202,12 @@ void ThreadIRCSeed(void* parg)
     } catch (...) {
         PrintExceptionContinue(NULL, "ThreadIRCSeed()");
     }
-    printf("ThreadIRCSeed exiting\n");
+    printf("ThreadIRCSeed exited\n");
 }
 
 void ThreadIRCSeed2(void* parg)
 {
-    /* Dont advertise on IRC if we don't allow incoming connections */
+    /* Don't advertise on IRC if we don't allow incoming connections */
     if (mapArgs.count("-connect") || fNoListen)
         return;
 
@@ -216,7 +217,6 @@ void ThreadIRCSeed2(void* parg)
     printf("ThreadIRCSeed started\n");
     int nErrorWait = 10;
     int nRetryWait = 10;
-    bool fNameInUse = false;
 
     while (!fShutdown)
     {
@@ -248,10 +248,12 @@ void ThreadIRCSeed2(void* parg)
                 return;
         }
 
+        CNetAddr addrIPv4("1.2.3.4"); // arbitrary IPv4 address to make GetLocal prefer IPv4 addresses
+        CService addrLocal;
         string strMyName;
-        if (addrLocalHost.IsRoutable() && !fUseProxy && !fNameInUse)
-            strMyName = EncodeAddress(addrLocalHost);
-        else
+        if (GetLocal(addrLocal, &addrIPv4))
+            strMyName = EncodeAddress(GetLocalAddress(&addrConnect));
+        if (strMyName == "")
             strMyName = strprintf("x%u", GetRand(1000000000));
 
         Send(hSocket, strprintf("NICK %s\r", strMyName.c_str()).c_str());
@@ -265,7 +267,6 @@ void ThreadIRCSeed2(void* parg)
             if (nRet == 2)
             {
                 printf("IRC name already in use\n");
-                fNameInUse = true;
                 Wait(10);
                 continue;
             }
@@ -282,12 +283,11 @@ void ThreadIRCSeed2(void* parg)
         if (GetIPFromIRC(hSocket, strMyName, addrFromIRC))
         {
             printf("GetIPFromIRC() returned %s\n", addrFromIRC.ToString().c_str());
-            if (!fUseProxy && addrFromIRC.IsRoutable())
+            if (addrFromIRC.IsRoutable())
             {
                 // IRC lets you to re-nick
-                fGotExternalIP = true;
-                addrLocalHost.SetIP(addrFromIRC);
-                strMyName = EncodeAddress(addrLocalHost);
+                AddLocal(addrFromIRC, LOCAL_IRC);
+                strMyName = EncodeAddress(GetLocalAddress(&addrConnect));
                 Send(hSocket, strprintf("NICK %s\r", strMyName.c_str()).c_str());
             }
         }

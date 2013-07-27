@@ -1,11 +1,11 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
 // Copyright (c) 2009-2012 The Bitcoin developers
 // Distributed under the MIT/X11 software license, see the accompanying
-// file license.txt or http://www.opensource.org/licenses/mit-license.php.
+// file COPYING or http://www.opensource.org/licenses/mit-license.php.
 #ifndef BITCOIN_DB_H
 #define BITCOIN_DB_H
 
-#include "key.h"
+#include "main.h"
 
 #include <map>
 #include <string>
@@ -13,8 +13,6 @@
 
 #include <db_cxx.h>
 
-class CAccount;
-class CAccountingEntry;
 class CAddress;
 class CAddrMan;
 class CBlockLocator;
@@ -27,11 +25,51 @@ class CWallet;
 class CWalletTx;
 
 extern unsigned int nWalletDBUpdated;
-extern DbEnv dbenv;
 
-extern void DBFlush(bool fShutdown);
 void ThreadFlushWalletDB(void* parg);
 bool BackupWallet(const CWallet& wallet, const std::string& strDest);
+
+
+class CDBEnv
+{
+private:
+    bool fDetachDB;
+    bool fDbEnvInit;
+    bool fMockDb;
+    boost::filesystem::path pathEnv;
+
+    void EnvShutdown();
+
+public:
+    mutable CCriticalSection cs_db;
+    DbEnv dbenv;
+    std::map<std::string, int> mapFileUseCount;
+    std::map<std::string, Db*> mapDb;
+
+    CDBEnv();
+    ~CDBEnv();
+    void MakeMock();
+    bool IsMock() { return fMockDb; };
+    bool Open(boost::filesystem::path pathEnv_);
+    void Close();
+    void Flush(bool fShutdown);
+    void CheckpointLSN(std::string strFile);
+    void SetDetach(bool fDetachDB_) { fDetachDB = fDetachDB_; }
+    bool GetDetach() { return fDetachDB; }
+
+    void CloseDb(const std::string& strFile);
+
+    DbTxn *TxnBegin(int flags=DB_TXN_WRITE_NOSYNC)
+    {
+        DbTxn* ptxn = NULL;
+        int ret = dbenv.txn_begin(NULL, &ptxn, flags);
+        if (!ptxn || ret != 0)
+            return NULL;
+        return ptxn;
+    }
+};
+
+extern CDBEnv bitdb;
 
 
 /** RAII class that provides access to a Berkeley database */
@@ -40,7 +78,7 @@ class CDB
 protected:
     Db* pdb;
     std::string strFile;
-    std::vector<DbTxn*> vTxn;
+    DbTxn *activeTxn;
     bool fReadOnly;
 
     explicit CDB(const char* pszFile, const char* pszMode="r+");
@@ -59,7 +97,7 @@ protected:
             return false;
 
         // Key
-        CDataStream ssKey(SER_DISK);
+        CDataStream ssKey(SER_DISK, CLIENT_VERSION);
         ssKey.reserve(1000);
         ssKey << key;
         Dbt datKey(&ssKey[0], ssKey.size());
@@ -67,14 +105,19 @@ protected:
         // Read
         Dbt datValue;
         datValue.set_flags(DB_DBT_MALLOC);
-        int ret = pdb->get(GetTxn(), &datKey, &datValue, 0);
+        int ret = pdb->get(activeTxn, &datKey, &datValue, 0);
         memset(datKey.get_data(), 0, datKey.get_size());
         if (datValue.get_data() == NULL)
             return false;
 
         // Unserialize value
-        CDataStream ssValue((char*)datValue.get_data(), (char*)datValue.get_data() + datValue.get_size(), SER_DISK);
-        ssValue >> value;
+        try {
+            CDataStream ssValue((char*)datValue.get_data(), (char*)datValue.get_data() + datValue.get_size(), SER_DISK, CLIENT_VERSION);
+            ssValue >> value;
+        }
+        catch (std::exception &e) {
+            return false;
+        }
 
         // Clear and free memory
         memset(datValue.get_data(), 0, datValue.get_size());
@@ -91,19 +134,19 @@ protected:
             assert(!"Write called on database in read-only mode");
 
         // Key
-        CDataStream ssKey(SER_DISK);
+        CDataStream ssKey(SER_DISK, CLIENT_VERSION);
         ssKey.reserve(1000);
         ssKey << key;
         Dbt datKey(&ssKey[0], ssKey.size());
 
         // Value
-        CDataStream ssValue(SER_DISK);
+        CDataStream ssValue(SER_DISK, CLIENT_VERSION);
         ssValue.reserve(10000);
         ssValue << value;
         Dbt datValue(&ssValue[0], ssValue.size());
 
         // Write
-        int ret = pdb->put(GetTxn(), &datKey, &datValue, (fOverwrite ? 0 : DB_NOOVERWRITE));
+        int ret = pdb->put(activeTxn, &datKey, &datValue, (fOverwrite ? 0 : DB_NOOVERWRITE));
 
         // Clear memory in case it was a private key
         memset(datKey.get_data(), 0, datKey.get_size());
@@ -120,13 +163,13 @@ protected:
             assert(!"Erase called on database in read-only mode");
 
         // Key
-        CDataStream ssKey(SER_DISK);
+        CDataStream ssKey(SER_DISK, CLIENT_VERSION);
         ssKey.reserve(1000);
         ssKey << key;
         Dbt datKey(&ssKey[0], ssKey.size());
 
         // Erase
-        int ret = pdb->del(GetTxn(), &datKey, 0);
+        int ret = pdb->del(activeTxn, &datKey, 0);
 
         // Clear memory
         memset(datKey.get_data(), 0, datKey.get_size());
@@ -140,13 +183,13 @@ protected:
             return false;
 
         // Key
-        CDataStream ssKey(SER_DISK);
+        CDataStream ssKey(SER_DISK, CLIENT_VERSION);
         ssKey.reserve(1000);
         ssKey << key;
         Dbt datKey(&ssKey[0], ssKey.size());
 
         // Exists
-        int ret = pdb->exists(GetTxn(), &datKey, 0);
+        int ret = pdb->exists(activeTxn, &datKey, 0);
 
         // Clear memory
         memset(datKey.get_data(), 0, datKey.get_size());
@@ -203,46 +246,33 @@ protected:
         return 0;
     }
 
-    DbTxn* GetTxn()
-    {
-        if (!vTxn.empty())
-            return vTxn.back();
-        else
-            return NULL;
-    }
-
 public:
     bool TxnBegin()
     {
-        if (!pdb)
+        if (!pdb || activeTxn)
             return false;
-        DbTxn* ptxn = NULL;
-        int ret = dbenv.txn_begin(GetTxn(), &ptxn, DB_TXN_NOSYNC);
-        if (!ptxn || ret != 0)
+        DbTxn* ptxn = bitdb.TxnBegin();
+        if (!ptxn)
             return false;
-        vTxn.push_back(ptxn);
+        activeTxn = ptxn;
         return true;
     }
 
     bool TxnCommit()
     {
-        if (!pdb)
+        if (!pdb || !activeTxn)
             return false;
-        if (vTxn.empty())
-            return false;
-        int ret = vTxn.back()->commit(0);
-        vTxn.pop_back();
+        int ret = activeTxn->commit(0);
+        activeTxn = NULL;
         return (ret == 0);
     }
 
     bool TxnAbort()
     {
-        if (!pdb)
+        if (!pdb || !activeTxn)
             return false;
-        if (vTxn.empty())
-            return false;
-        int ret = vTxn.back()->abort();
-        vTxn.pop_back();
+        int ret = activeTxn->abort();
+        activeTxn = NULL;
         return (ret == 0);
     }
 
@@ -280,231 +310,32 @@ public:
     bool AddTxIndex(const CTransaction& tx, const CDiskTxPos& pos, int nHeight);
     bool EraseTxIndex(const CTransaction& tx);
     bool ContainsTx(uint256 hash);
-    bool ReadOwnerTxes(uint160 hash160, int nHeight, std::vector<CTransaction>& vtx);
     bool ReadDiskTx(uint256 hash, CTransaction& tx, CTxIndex& txindex);
     bool ReadDiskTx(uint256 hash, CTransaction& tx);
     bool ReadDiskTx(COutPoint outpoint, CTransaction& tx, CTxIndex& txindex);
     bool ReadDiskTx(COutPoint outpoint, CTransaction& tx);
     bool WriteBlockIndex(const CDiskBlockIndex& blockindex);
-    bool EraseBlockIndex(uint256 hash);
     bool ReadHashBestChain(uint256& hashBestChain);
     bool WriteHashBestChain(uint256 hashBestChain);
     bool ReadBestInvalidWork(CBigNum& bnBestInvalidWork);
     bool WriteBestInvalidWork(CBigNum bnBestInvalidWork);
     bool LoadBlockIndex();
-};
-
-
-
-
-/** Access to the (IP) address database (addr.dat) */
-class CAddrDB : public CDB
-{
-public:
-    CAddrDB(const char* pszMode="r+") : CDB("addr.dat", pszMode) { }
 private:
-    CAddrDB(const CAddrDB&);
-    void operator=(const CAddrDB&);
-public:
-    bool WriteAddrman(const CAddrMan& addr);
-    bool LoadAddresses();
-};
-
-bool LoadAddresses();
-
-
-/** A key pool entry */
-class CKeyPool
-{
-public:
-    int64 nTime;
-    std::vector<unsigned char> vchPubKey;
-
-    CKeyPool()
-    {
-        nTime = GetTime();
-    }
-
-    CKeyPool(const std::vector<unsigned char>& vchPubKeyIn)
-    {
-        nTime = GetTime();
-        vchPubKey = vchPubKeyIn;
-    }
-
-    IMPLEMENT_SERIALIZE
-    (
-        if (!(nType & SER_GETHASH))
-            READWRITE(nVersion);
-        READWRITE(nTime);
-        READWRITE(vchPubKey);
-    )
+    bool LoadBlockIndexGuts();
 };
 
 
 
-/** Error statuses for the wallet database */
-enum DBErrors
-{
-    DB_LOAD_OK,
-    DB_CORRUPT,
-    DB_TOO_NEW,
-    DB_LOAD_FAIL,
-    DB_NEED_REWRITE
-};
 
-/** Access to the wallet database (wallet.dat) */
-class CWalletDB : public CDB
+/** Access to the (IP) address database (peers.dat) */
+class CAddrDB
 {
-public:
-    CWalletDB(std::string strFilename, const char* pszMode="r+") : CDB(strFilename.c_str(), pszMode)
-    {
-    }
 private:
-    CWalletDB(const CWalletDB&);
-    void operator=(const CWalletDB&);
+    boost::filesystem::path pathAddr;
 public:
-    bool ReadName(const std::string& strAddress, std::string& strName)
-    {
-        strName = "";
-        return Read(std::make_pair(std::string("name"), strAddress), strName);
-    }
-
-    bool WriteName(const std::string& strAddress, const std::string& strName);
-
-    bool EraseName(const std::string& strAddress);
-
-    bool ReadTx(uint256 hash, CWalletTx& wtx)
-    {
-        return Read(std::make_pair(std::string("tx"), hash), wtx);
-    }
-
-    bool WriteTx(uint256 hash, const CWalletTx& wtx)
-    {
-        nWalletDBUpdated++;
-        return Write(std::make_pair(std::string("tx"), hash), wtx);
-    }
-
-    bool EraseTx(uint256 hash)
-    {
-        nWalletDBUpdated++;
-        return Erase(std::make_pair(std::string("tx"), hash));
-    }
-
-    bool ReadKey(const std::vector<unsigned char>& vchPubKey, CPrivKey& vchPrivKey)
-    {
-        vchPrivKey.clear();
-        return Read(std::make_pair(std::string("key"), vchPubKey), vchPrivKey);
-    }
-
-    bool WriteKey(const std::vector<unsigned char>& vchPubKey, const CPrivKey& vchPrivKey)
-    {
-        nWalletDBUpdated++;
-        return Write(std::make_pair(std::string("key"), vchPubKey), vchPrivKey, false);
-    }
-
-    bool WriteCryptedKey(const std::vector<unsigned char>& vchPubKey, const std::vector<unsigned char>& vchCryptedSecret, bool fEraseUnencryptedKey = true)
-    {
-        nWalletDBUpdated++;
-        if (!Write(std::make_pair(std::string("ckey"), vchPubKey), vchCryptedSecret, false))
-            return false;
-        if (fEraseUnencryptedKey)
-        {
-            Erase(std::make_pair(std::string("key"), vchPubKey));
-            Erase(std::make_pair(std::string("wkey"), vchPubKey));
-        }
-        return true;
-    }
-
-    bool WriteMasterKey(unsigned int nID, const CMasterKey& kMasterKey)
-    {
-        nWalletDBUpdated++;
-        return Write(std::make_pair(std::string("mkey"), nID), kMasterKey, true);
-    }
-
-    // Support for BIP 0013 : see https://en.bitcoin.it/wiki/BIP_0013
-    bool ReadCScript(const uint160 &hash, CScript& redeemScript)
-    {
-        redeemScript.clear();
-        return Read(std::make_pair(std::string("cscript"), hash), redeemScript);
-    }
-
-    bool WriteCScript(const uint160& hash, const CScript& redeemScript)
-    {
-        nWalletDBUpdated++;
-        return Write(std::make_pair(std::string("cscript"), hash), redeemScript, false);
-    }
-
-    bool WriteBestBlock(const CBlockLocator& locator)
-    {
-        nWalletDBUpdated++;
-        return Write(std::string("bestblock"), locator);
-    }
-
-    bool ReadBestBlock(CBlockLocator& locator)
-    {
-        return Read(std::string("bestblock"), locator);
-    }
-
-    bool ReadDefaultKey(std::vector<unsigned char>& vchPubKey)
-    {
-        vchPubKey.clear();
-        return Read(std::string("defaultkey"), vchPubKey);
-    }
-
-    bool WriteDefaultKey(const std::vector<unsigned char>& vchPubKey)
-    {
-        nWalletDBUpdated++;
-        return Write(std::string("defaultkey"), vchPubKey);
-    }
-
-    bool ReadPool(int64 nPool, CKeyPool& keypool)
-    {
-        return Read(std::make_pair(std::string("pool"), nPool), keypool);
-    }
-
-    bool WritePool(int64 nPool, const CKeyPool& keypool)
-    {
-        nWalletDBUpdated++;
-        return Write(std::make_pair(std::string("pool"), nPool), keypool);
-    }
-
-    bool ErasePool(int64 nPool)
-    {
-        nWalletDBUpdated++;
-        return Erase(std::make_pair(std::string("pool"), nPool));
-    }
-
-    // Settings are no longer stored in wallet.dat; these are
-    // used only for backwards compatibility:
-    template<typename T>
-    bool ReadSetting(const std::string& strKey, T& value)
-    {
-        return Read(std::make_pair(std::string("setting"), strKey), value);
-    }
-    template<typename T>
-    bool WriteSetting(const std::string& strKey, const T& value)
-    {
-        nWalletDBUpdated++;
-        return Write(std::make_pair(std::string("setting"), strKey), value);
-    }
-    bool EraseSetting(const std::string& strKey)
-    {
-        nWalletDBUpdated++;
-        return Erase(std::make_pair(std::string("setting"), strKey));
-    }
-
-    bool WriteMinVersion(int nVersion)
-    {
-        return Write(std::string("minversion"), nVersion);
-    }
-
-    bool ReadAccount(const std::string& strAccount, CAccount& account);
-    bool WriteAccount(const std::string& strAccount, const CAccount& account);
-    bool WriteAccountingEntry(const CAccountingEntry& acentry);
-    int64 GetAccountCreditDebit(const std::string& strAccount);
-    void ListAccountCreditDebit(const std::string& strAccount, std::list<CAccountingEntry>& acentries);
-
-    int LoadWallet(CWallet* pwallet);
+    CAddrDB();
+    bool Write(const CAddrMan& addr);
+    bool Read(CAddrMan& addr);
 };
 
-#endif
+#endif // BITCOIN_DB_H

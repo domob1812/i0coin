@@ -1,34 +1,32 @@
 // Copyright (c) 2010 Satoshi Nakamoto
 // Copyright (c) 2009-2012 The Bitcoin developers
 // Distributed under the MIT/X11 software license, see the accompanying
-// file license.txt or http://www.opensource.org/licenses/mit-license.php.
+// file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
-#include "headers.h"
-#include "db.h"
-#include "net.h"
 #include "init.h"
 #include "auxpow.h"
+#include "util.h"
+#include "sync.h"
+#include "ui_interface.h"
+#include "base58.h"
+#include "bitcoinrpc.h"
+
 #undef printf
 #include <boost/asio.hpp>
+#include <boost/asio/ip/v6_only.hpp>
+#include <boost/bind.hpp>
 #include <boost/filesystem.hpp>
+#include <boost/foreach.hpp>
 #include <boost/iostreams/concepts.hpp>
 #include <boost/iostreams/stream.hpp>
 #include <boost/algorithm/string.hpp>
 #include <boost/lexical_cast.hpp>
-#ifdef USE_SSL
-#include <boost/asio/ssl.hpp> 
-#include <boost/filesystem.hpp>
+#include <boost/asio/ssl.hpp>
 #include <boost/filesystem/fstream.hpp>
-typedef boost::asio::ssl::stream<boost::asio::ip::tcp::socket> SSLStream;
-#endif
-#include "json/json_spirit_reader_template.h"
-#include "json/json_spirit_writer_template.h"
-#include "json/json_spirit_utils.h"
+#include <boost/shared_ptr.hpp>
+#include <list>
+
 #define printf OutputDebugStringF
-// MinGW 3.4.5 gets "fatal error: had to relocate PCH" if the json headers are
-// precompiled in headers.h.  The problem might be when the pch file goes over
-// a certain size around 145MB.  If we need access to json_spirit outside this
-// file, we could use the compiled json_spirit option.
 
 using namespace std;
 using namespace boost;
@@ -36,16 +34,12 @@ using namespace boost::asio;
 using namespace json_spirit;
 
 void ThreadRPCServer2(void* parg);
-typedef Value(*rpcfn_type)(const Array& params, bool fHelp);
-extern map<string, rpcfn_type> mapCallTable;
 
 static std::string strRPCUserColonPass;
 
-static int64 nWalletUnlockTime;
-static CCriticalSection cs_nWalletUnlockTime;
+const Object emptyobj;
 
-extern Value dumpprivkey(const Array& params, bool fHelp);
-extern Value importprivkey(const Array& params, bool fHelp);
+void ThreadRPCServer3(void* parg);
 
 Object JSONRPCError(int code, const string& message)
 {
@@ -55,37 +49,45 @@ Object JSONRPCError(int code, const string& message)
     return error;
 }
 
-double GetDifficulty(const CBlockIndex* blockindex = NULL)
+void RPCTypeCheck(const Array& params,
+                  const list<Value_type>& typesExpected,
+                  bool fAllowNull)
 {
-    // Floating point number that is a multiple of the minimum difficulty,
-    // minimum difficulty = 1.0.
-    if (blockindex == NULL)
+    unsigned int i = 0;
+    BOOST_FOREACH(Value_type t, typesExpected)
     {
-        if (pindexBest == NULL)
-            return 1.0;
-        else
-            blockindex = pindexBest;
+        if (params.size() <= i)
+            break;
+
+        const Value& v = params[i];
+        if (!((v.type() == t) || (fAllowNull && (v.type() == null_type))))
+        {
+            string err = strprintf("Expected type %s, got %s",
+                                   Value_type_name[t], Value_type_name[v.type()]);
+            throw JSONRPCError(-3, err);
+        }
+        i++;
     }
-
-    int nShift = (blockindex->nBits >> 24) & 0xff;
-
-    double dDiff =
-        (double)0x0000ffff / (double)(blockindex->nBits & 0x00ffffff);
-
-    while (nShift < 29)
-    {
-        dDiff *= 256.0;
-        nShift++;
-    }
-    while (nShift > 29)
-    {
-        dDiff /= 256.0;
-        nShift--;
-    }
-
-    return dDiff;
 }
 
+void RPCTypeCheck(const Object& o,
+                  const map<string, Value_type>& typesExpected,
+                  bool fAllowNull)
+{
+    BOOST_FOREACH(const PAIRTYPE(string, Value_type)& t, typesExpected)
+    {
+        const Value& v = find_value(o, t.first);
+        if (!fAllowNull && v.type() == null_type)
+            throw JSONRPCError(-3, strprintf("Missing %s", t.first.c_str()));
+
+        if (!((v.type() == t.second) || (fAllowNull && (v.type() == null_type))))
+        {
+            string err = strprintf("Expected type %s for %s, got %s",
+                                   Value_type_name[t.second], t.first.c_str(), Value_type_name[v.type()]);
+            throw JSONRPCError(-3, err);
+        }
+    }
+}
 
 int64 AmountFromValue(const Value& value)
 {
@@ -103,8 +105,7 @@ Value ValueFromAmount(int64 amount)
     return (double)amount / (double)COIN;
 }
 
-std::string
-HexBits(unsigned int nBits)
+std::string HexBits(unsigned int nBits)
 {
     union {
         int32_t nBits;
@@ -114,59 +115,47 @@ HexBits(unsigned int nBits)
     return HexStr(BEGIN(uBits.cBits), END(uBits.cBits));
 }
 
-void WalletTxToJSON(const CWalletTx& wtx, Object& entry)
-{
-    int confirms = wtx.GetDepthInMainChain();
-    entry.push_back(Pair("confirmations", confirms));
-    if (confirms)
-    {
-        entry.push_back(Pair("blockhash", wtx.hashBlock.GetHex()));
-        entry.push_back(Pair("blockindex", wtx.nIndex));
-    }
-    entry.push_back(Pair("txid", wtx.GetHash().GetHex()));
-    entry.push_back(Pair("time", (boost::int64_t)wtx.GetTxTime()));
-    BOOST_FOREACH(const PAIRTYPE(string,string)& item, wtx.mapValue)
-        entry.push_back(Pair(item.first, item.second));
-}
-
-string AccountFromValue(const Value& value)
-{
-    string strAccount = value.get_str();
-    if (strAccount == "*")
-        throw JSONRPCError(-11, "Invalid account name");
-    return strAccount;
-}
-
-Object blockToJSON(const CBlock& block, const CBlockIndex* blockindex)
-{
-    Object result;
-    result.push_back(Pair("hash", block.GetHash().GetHex()));
-    result.push_back(Pair("size", (int)::GetSerializeSize(block, SER_NETWORK)));
-    result.push_back(Pair("height", blockindex->nHeight));
-    result.push_back(Pair("version", block.nVersion));
-    result.push_back(Pair("merkleroot", block.hashMerkleRoot.GetHex()));
-    result.push_back(Pair("time", (boost::int64_t)block.GetBlockTime()));
-    result.push_back(Pair("nonce", (boost::uint64_t)block.nNonce));
-    result.push_back(Pair("bits", HexBits(block.nBits)));
-    result.push_back(Pair("difficulty", GetDifficulty(blockindex)));
-    Array txhashes;
-    BOOST_FOREACH (const CTransaction&tx, block.vtx)
-        txhashes.push_back(tx.GetHash().GetHex());
-    result.push_back(Pair("tx", txhashes));
-
-    if (blockindex->pprev)
-        result.push_back(Pair("previousblockhash", blockindex->pprev->GetBlockHash().GetHex()));
-    if (blockindex->pnext)
-        result.push_back(Pair("nextblockhash", blockindex->pnext->GetBlockHash().GetHex()));
-    return result;
-}
-
 
 
 ///
 /// Note: This interface may still be subject to change.
 ///
 
+string CRPCTable::help(string strCommand) const
+{
+    string strRet;
+    set<rpcfn_type> setDone;
+    for (map<string, const CRPCCommand*>::const_iterator mi = mapCommands.begin(); mi != mapCommands.end(); ++mi)
+    {
+        const CRPCCommand *pcmd = mi->second;
+        string strMethod = mi->first;
+        // We already filter duplicates, but these deprecated screw up the sort order
+        if (strMethod.find("label") != string::npos)
+            continue;
+        if (strCommand != "" && strMethod != strCommand)
+            continue;
+        try
+        {
+            Array params;
+            rpcfn_type pfn = pcmd->actor;
+            if (setDone.insert(pfn).second)
+                (*pfn)(params, true);
+        }
+        catch (std::exception& e)
+        {
+            // Help text is returned in an exception
+            string strHelp = string(e.what());
+            if (strCommand == "")
+                if (strHelp.find('\n') != string::npos)
+                    strHelp = strHelp.substr(0, strHelp.find('\n'));
+            strRet += strHelp + "\n";
+        }
+    }
+    if (strRet == "")
+        strRet = strprintf("help: unknown command: %s\n", strCommand.c_str());
+    strRet = strRet.substr(0,strRet.size()-1);
+    return strRet;
+}
 
 Value help(const Array& params, bool fHelp)
 {
@@ -179,40 +168,7 @@ Value help(const Array& params, bool fHelp)
     if (params.size() > 0)
         strCommand = params[0].get_str();
 
-    string strRet;
-    set<rpcfn_type> setDone;
-    for (map<string, rpcfn_type>::iterator mi = mapCallTable.begin(); mi != mapCallTable.end(); ++mi)
-    {
-        string strMethod = (*mi).first;
-        // We already filter duplicates, but these deprecated screw up the sort order
-        if (strMethod == "getamountreceived" ||
-            strMethod == "getallreceived" ||
-            strMethod == "getblocknumber" || // deprecated
-            (strMethod.find("label") != string::npos))
-            continue;
-        if (strCommand != "" && strMethod != strCommand)
-            continue;
-        try
-        {
-            Array params;
-            rpcfn_type pfn = (*mi).second;
-            if (setDone.insert(pfn).second)
-                (*pfn)(params, true);
-        }
-        catch (std::exception& e)
-        {
-            // Help text is returned in an exception
-            string strHelp = string(e.what());
-            if (strCommand == "")
-                if (strHelp.find('\n') != -1)
-                    strHelp = strHelp.substr(0, strHelp.find('\n'));
-            strRet += strHelp + "\n";
-        }
-    }
-    if (strRet == "")
-        strRet = strprintf("help: unknown command: %s\n", strCommand.c_str());
-    strRet = strRet.substr(0,strRet.size()-1);
-    return strRet;
+    return tableRPC.help(strCommand);
 }
 
 
@@ -221,2225 +177,11 @@ Value stop(const Array& params, bool fHelp)
     if (fHelp || params.size() != 0)
         throw runtime_error(
             "stop\n"
-            "Stop i0coin server.");
-#ifndef QT_GUI
+            "Stop I0coin server.");
     // Shutdown will take long enough that the response should get back
-    CreateThread(Shutdown, NULL);
-    return "i0coin server stopping";
-#else
-    throw runtime_error("NYI: cannot shut down GUI with RPC command");
-#endif
+    StartShutdown();
+    return "I0coin server stopping";
 }
-
-
-Value getblockcount(const Array& params, bool fHelp)
-{
-    if (fHelp || params.size() != 0)
-        throw runtime_error(
-            "getblockcount\n"
-            "Returns the number of blocks in the longest block chain.");
-
-    return nBestHeight;
-}
-
-
-// deprecated
-Value getblocknumber(const Array& params, bool fHelp)
-{
-    if (fHelp || params.size() != 0)
-        throw runtime_error(
-            "getblocknumber\n"
-            "Deprecated.  Use getblockcount.");
-
-    return nBestHeight;
-}
-
-Value BlockToValue(CBlock &block)
-{
-    Object obj;
-    obj.push_back(Pair("hash", block.GetHash().ToString().c_str()));
-    obj.push_back(Pair("version", block.nVersion));
-    obj.push_back(Pair("prev_block", block.hashPrevBlock.ToString().c_str()));
-    obj.push_back(Pair("mrkl_root", block.hashMerkleRoot.ToString().c_str()));
-    obj.push_back(Pair("time", (uint64_t)block.nTime));
-    obj.push_back(Pair("bits", (uint64_t)block.nBits));
-    obj.push_back(Pair("nonce", (uint64_t)block.nNonce));
-    obj.push_back(Pair("n_tx", (int)block.vtx.size()));
-    obj.push_back(Pair("size", (int)::GetSerializeSize(block, SER_NETWORK)));
-
-    Array tx;
-    for (int i = 0; i < block.vtx.size(); i++) {
-    	Object txobj;
-
-	txobj.push_back(Pair("hash", block.vtx[i].GetHash().ToString().c_str()));
-	txobj.push_back(Pair("version", block.vtx[i].nVersion));
-	txobj.push_back(Pair("lock_time", (uint64_t)block.vtx[i].nLockTime));
-	txobj.push_back(Pair("size",
-		(int)::GetSerializeSize(block.vtx[i], SER_NETWORK)));
-
-	Array tx_vin;
-	for (int j = 0; j < block.vtx[i].vin.size(); j++) {
-	    Object vino;
-
-	    Object vino_outpt;
-
-	    vino_outpt.push_back(Pair("hash",
-	    	block.vtx[i].vin[j].prevout.hash.ToString().c_str()));
-	    vino_outpt.push_back(Pair("n", (uint64_t)block.vtx[i].vin[j].prevout.n));
-
-	    vino.push_back(Pair("prev_out", vino_outpt));
-
-	    if (block.vtx[i].vin[j].prevout.IsNull())
-	    	vino.push_back(Pair("coinbase", HexStr(
-			block.vtx[i].vin[j].scriptSig.begin(),
-			block.vtx[i].vin[j].scriptSig.end(), false).c_str()));
-	    else
-	    	vino.push_back(Pair("scriptSig", 
-			block.vtx[i].vin[j].scriptSig.ToString().c_str()));
-	    if (block.vtx[i].vin[j].nSequence != UINT_MAX)
-	    	vino.push_back(Pair("sequence", (uint64_t)block.vtx[i].vin[j].nSequence));
-
-	    tx_vin.push_back(vino);
-	}
-
-	Array tx_vout;
-	for (int j = 0; j < block.vtx[i].vout.size(); j++) {
-	    Object vouto;
-
-	    vouto.push_back(Pair("value",
-	    	(double)block.vtx[i].vout[j].nValue / (double)COIN));
-	    vouto.push_back(Pair("scriptPubKey", 
-		block.vtx[i].vout[j].scriptPubKey.ToString().c_str()));
-
-	    tx_vout.push_back(vouto);
-	}
-
-	txobj.push_back(Pair("in", tx_vin));
-	txobj.push_back(Pair("out", tx_vout));
-
-	tx.push_back(txobj);
-    }
-
-    obj.push_back(Pair("tx", tx));
-
-    Array mrkl;
-    for (int i = 0; i < block.vMerkleTree.size(); i++)
-    	mrkl.push_back(block.vMerkleTree[i].ToString().c_str());
-
-    obj.push_back(Pair("mrkl_tree", mrkl));
-
-    return obj;
-}
-
-Value getblockbycount(const Array& params, bool fHelp)
-{
-    if (fHelp || params.size() != 1)
-        throw runtime_error(
-            "getblockbycount height\n"
-            "Dumps the block existing at specified height");
-
-    int64 height = params[0].get_int64();
-    if (height > nBestHeight)
-        throw runtime_error(
-            "getblockbycount height\n"
-            "Dumps the block existing at specified height");
-
-    string blkname = strprintf("blk%d", height);
-
-    CBlockIndex* pindex;
-    bool found = false;
-
-    for (map<uint256, CBlockIndex*>::iterator mi = mapBlockIndex.begin();
-         mi != mapBlockIndex.end(); ++mi)
-    {
-    	pindex = (*mi).second;
-	if ((pindex->nHeight == height) && (pindex->IsInMainChain())) {
-		found = true;
-		break;
-	}
-    }
-
-    if (!found)
-        throw runtime_error(
-            "getblockbycount height\n"
-            "Dumps the block existing at specified height");
-
-    CBlock block;
-    block.ReadFromDisk(pindex);
-    block.BuildMerkleTree();
-
-    return BlockToValue(block);
-}
-
-
-Value getblockbyhash(const Array& params, bool fHelp)
-{
-    if (fHelp || params.size() != 1)
-        throw runtime_error(
-            "getblockbyhash hash\n"
-            "Dumps the block with specified hash");
-
-    uint256 hash;
-    hash.SetHex(params[0].get_str());
-
-    map<uint256, CBlockIndex*>::iterator mi = mapBlockIndex.find(hash);
-    if (mi == mapBlockIndex.end())
-        throw JSONRPCError(-18, "hash not found");
-
-    CBlockIndex* pindex = (*mi).second;
-
-    CBlock block;
-    block.ReadFromDisk(pindex);
-    block.BuildMerkleTree();
-
-    return BlockToValue(block);
-}
-
-Value getconnectioncount(const Array& params, bool fHelp)
-{
-    if (fHelp || params.size() != 0)
-        throw runtime_error(
-            "getconnectioncount\n"
-            "Returns the number of connections to other nodes.");
-
-    return (int)vNodes.size();
-}
-
-
-Value getdifficulty(const Array& params, bool fHelp)
-{
-    if (fHelp || params.size() != 0)
-        throw runtime_error(
-            "getdifficulty\n"
-            "Returns the proof-of-work difficulty as a multiple of the minimum difficulty.");
-
-    return GetDifficulty();
-}
-
-
-Value getgenerate(const Array& params, bool fHelp)
-{
-    if (fHelp || params.size() != 0)
-        throw runtime_error(
-            "getgenerate\n"
-            "Returns true or false.");
-
-    return GetBoolArg("-gen");
-}
-
-
-Value setgenerate(const Array& params, bool fHelp)
-{
-    if (fHelp || params.size() < 1 || params.size() > 2)
-        throw runtime_error(
-            "setgenerate <generate> [genproclimit]\n"
-            "<generate> is true or false to turn generation on or off.\n"
-            "Generation is limited to [genproclimit] processors, -1 is unlimited.");
-
-    bool fGenerate = true;
-    if (params.size() > 0)
-        fGenerate = params[0].get_bool();
-
-    if (params.size() > 1)
-    {
-        int nGenProcLimit = params[1].get_int();
-        mapArgs["-genproclimit"] = itostr(nGenProcLimit);
-        if (nGenProcLimit == 0)
-            fGenerate = false;
-    }
-    mapArgs["-gen"] = (fGenerate ? "1" : "0");
-
-    GenerateBitcoins(fGenerate, pwalletMain);
-    return Value::null;
-}
-
-
-Value gethashespersec(const Array& params, bool fHelp)
-{
-    if (fHelp || params.size() != 0)
-        throw runtime_error(
-            "gethashespersec\n"
-            "Returns a recent hashes per second performance measurement while generating.");
-
-    if (GetTimeMillis() - nHPSTimerStart > 8000)
-        return (boost::int64_t)0;
-    return (boost::int64_t)dHashesPerSec;
-}
-
-
-Value getinfo(const Array& params, bool fHelp)
-{
-    if (fHelp || params.size() != 0)
-        throw runtime_error(
-            "getinfo\n"
-            "Returns an object containing various state info.");
-
-    Object obj;
-    obj.push_back(Pair("version",       (int)CLIENT_VERSION));
-    obj.push_back(Pair("protocolversion",(int)PROTOCOL_VERSION));
-    obj.push_back(Pair("walletversion", pwalletMain->GetVersion()));
-    obj.push_back(Pair("balance",       ValueFromAmount(pwalletMain->GetBalance())));
-    obj.push_back(Pair("blocks",        (int)nBestHeight));
-    obj.push_back(Pair("connections",   (int)vNodes.size()));
-    obj.push_back(Pair("proxy",         (fUseProxy ? addrProxy.ToStringIPPort() : string())));
-    obj.push_back(Pair("difficulty",    (double)GetDifficulty()));
-    obj.push_back(Pair("testnet",       fTestNet));
-    obj.push_back(Pair("keypoololdest", (boost::int64_t)pwalletMain->GetOldestKeyPoolTime()));
-    obj.push_back(Pair("keypoolsize",   pwalletMain->GetKeyPoolSize()));
-    obj.push_back(Pair("paytxfee",      ValueFromAmount(nTransactionFee)));
-    if (pwalletMain->IsCrypted())
-        obj.push_back(Pair("unlocked_until", (boost::int64_t)nWalletUnlockTime / 1000));
-    obj.push_back(Pair("errors",        GetWarnings("statusbar")));
-    return obj;
-}
-
-
-Value getmininginfo(const Array& params, bool fHelp)
-{
-    if (fHelp || params.size() != 0)
-        throw runtime_error(
-            "getmininginfo\n"
-            "Returns an object containing mining-related information.");
-
-    Object obj;
-    obj.push_back(Pair("blocks",        (int)nBestHeight));
-    obj.push_back(Pair("currentblocksize",(uint64_t)nLastBlockSize));
-    obj.push_back(Pair("currentblocktx",(uint64_t)nLastBlockTx));
-    obj.push_back(Pair("difficulty",    (double)GetDifficulty()));
-    obj.push_back(Pair("errors",        GetWarnings("statusbar")));
-    obj.push_back(Pair("generate",      GetBoolArg("-gen")));
-    obj.push_back(Pair("genproclimit",  (int)GetArg("-genproclimit", -1)));
-    obj.push_back(Pair("hashespersec",  gethashespersec(params, false)));
-    obj.push_back(Pair("pooledtx",      (uint64_t)nPooledTx));
-    obj.push_back(Pair("testnet",       fTestNet));
-    return obj;
-}
-
-
-Value getnewaddress(const Array& params, bool fHelp)
-{
-    if (fHelp || params.size() > 1)
-        throw runtime_error(
-            "getnewaddress [account]\n"
-            "Returns a new i0coin address for receiving payments.  "
-            "If [account] is specified (recommended), it is added to the address book "
-            "so payments received with the address will be credited to [account].");
-
-    // Parse the account first so we don't generate a key if there's an error
-    string strAccount;
-    if (params.size() > 0)
-        strAccount = AccountFromValue(params[0]);
-
-    if (!pwalletMain->IsLocked())
-        pwalletMain->TopUpKeyPool();
-
-    // Generate a new key that is added to wallet
-    std::vector<unsigned char> newKey;
-    if (!pwalletMain->GetKeyFromPool(newKey, false))
-        throw JSONRPCError(-12, "Error: Keypool ran out, please call keypoolrefill first");
-    CBitcoinAddress address(newKey);
-
-    pwalletMain->SetAddressBookName(address, strAccount);
-
-    return address.ToString();
-}
-
-
-CBitcoinAddress GetAccountAddress(string strAccount, bool bForceNew=false)
-{
-    CWalletDB walletdb(pwalletMain->strWalletFile);
-
-    CAccount account;
-    walletdb.ReadAccount(strAccount, account);
-
-    bool bKeyUsed = false;
-
-    // Check if the current key has been used
-    if (!account.vchPubKey.empty())
-    {
-        CScript scriptPubKey;
-        scriptPubKey.SetBitcoinAddress(account.vchPubKey);
-        for (map<uint256, CWalletTx>::iterator it = pwalletMain->mapWallet.begin();
-             it != pwalletMain->mapWallet.end() && !account.vchPubKey.empty();
-             ++it)
-        {
-            const CWalletTx& wtx = (*it).second;
-            BOOST_FOREACH(const CTxOut& txout, wtx.vout)
-                if (txout.scriptPubKey == scriptPubKey)
-                    bKeyUsed = true;
-        }
-    }
-
-    // Generate a new key
-    if (account.vchPubKey.empty() || bForceNew || bKeyUsed)
-    {
-        if (!pwalletMain->GetKeyFromPool(account.vchPubKey, false))
-            throw JSONRPCError(-12, "Error: Keypool ran out, please call keypoolrefill first");
-
-        pwalletMain->SetAddressBookName(CBitcoinAddress(account.vchPubKey), strAccount);
-        walletdb.WriteAccount(strAccount, account);
-    }
-
-    return CBitcoinAddress(account.vchPubKey);
-}
-
-Value getaccountaddress(const Array& params, bool fHelp)
-{
-    if (fHelp || params.size() != 1)
-        throw runtime_error(
-            "getaccountaddress <account>\n"
-            "Returns the current i0coin address for receiving payments to this account.");
-
-    // Parse the account first so we don't generate a key if there's an error
-    string strAccount = AccountFromValue(params[0]);
-
-    Value ret;
-
-    ret = GetAccountAddress(strAccount).ToString();
-
-    return ret;
-}
-
-
-
-Value setaccount(const Array& params, bool fHelp)
-{
-    if (fHelp || params.size() < 1 || params.size() > 2)
-        throw runtime_error(
-            "setaccount <i0coinaddress> <account>\n"
-            "Sets the account associated with the given address.");
-
-    CBitcoinAddress address(params[0].get_str());
-    if (!address.IsValid())
-        throw JSONRPCError(-5, "Invalid i0coin address");
-
-
-    string strAccount;
-    if (params.size() > 1)
-        strAccount = AccountFromValue(params[1]);
-
-    // Detect when changing the account of an address that is the 'unused current key' of another account:
-    if (pwalletMain->mapAddressBook.count(address))
-    {
-        string strOldAccount = pwalletMain->mapAddressBook[address];
-        if (address == GetAccountAddress(strOldAccount))
-            GetAccountAddress(strOldAccount, true);
-    }
-
-    pwalletMain->SetAddressBookName(address, strAccount);
-
-    return Value::null;
-}
-
-
-Value getaccount(const Array& params, bool fHelp)
-{
-    if (fHelp || params.size() != 1)
-        throw runtime_error(
-            "getaccount <i0coinaddress>\n"
-            "Returns the account associated with the given address.");
-
-    CBitcoinAddress address(params[0].get_str());
-    if (!address.IsValid())
-        throw JSONRPCError(-5, "Invalid i0coin address");
-
-    string strAccount;
-    map<CBitcoinAddress, string>::iterator mi = pwalletMain->mapAddressBook.find(address);
-    if (mi != pwalletMain->mapAddressBook.end() && !(*mi).second.empty())
-        strAccount = (*mi).second;
-    return strAccount;
-}
-
-
-Value getaddressesbyaccount(const Array& params, bool fHelp)
-{
-    if (fHelp || params.size() != 1)
-        throw runtime_error(
-            "getaddressesbyaccount <account>\n"
-            "Returns the list of addresses for the given account.");
-
-    string strAccount = AccountFromValue(params[0]);
-
-    // Find all addresses that have the given account
-    Array ret;
-    BOOST_FOREACH(const PAIRTYPE(CBitcoinAddress, string)& item, pwalletMain->mapAddressBook)
-    {
-        const CBitcoinAddress& address = item.first;
-        const string& strName = item.second;
-        if (strName == strAccount)
-            ret.push_back(address.ToString());
-    }
-    return ret;
-}
-
-Value settxfee(const Array& params, bool fHelp)
-{
-    if (fHelp || params.size() < 1 || params.size() > 1)
-        throw runtime_error(
-            "settxfee <amount>\n"
-            "<amount> is a real and is rounded to the nearest 0.00000001");
-
-    // Amount
-    int64 nAmount = 0;
-    if (params[0].get_real() != 0.0)
-        nAmount = AmountFromValue(params[0]);        // rejects 0.0 amounts
-
-    nTransactionFee = nAmount;
-    return true;
-}
-
-Value sendtoaddress(const Array& params, bool fHelp)
-{
-    if (pwalletMain->IsCrypted() && (fHelp || params.size() < 2 || params.size() > 4))
-        throw runtime_error(
-            "sendtoaddress <i0coinaddress> <amount> [comment] [comment-to]\n"
-            "<amount> is a real and is rounded to the nearest 0.00000001\n"
-            "requires wallet passphrase to be set with walletpassphrase first");
-    if (!pwalletMain->IsCrypted() && (fHelp || params.size() < 2 || params.size() > 4))
-        throw runtime_error(
-            "sendtoaddress <i0coinaddress> <amount> [comment] [comment-to]\n"
-            "<amount> is a real and is rounded to the nearest 0.00000001");
-
-    CBitcoinAddress address(params[0].get_str());
-    if (!address.IsValid())
-        throw JSONRPCError(-5, "Invalid i0coin address");
-
-    // Amount
-    int64 nAmount = AmountFromValue(params[1]);
-
-    // Wallet comments
-    CWalletTx wtx;
-    if (params.size() > 2 && params[2].type() != null_type && !params[2].get_str().empty())
-        wtx.mapValue["comment"] = params[2].get_str();
-    if (params.size() > 3 && params[3].type() != null_type && !params[3].get_str().empty())
-        wtx.mapValue["to"]      = params[3].get_str();
-
-    if (pwalletMain->IsLocked())
-        throw JSONRPCError(-13, "Error: Please enter the wallet passphrase with walletpassphrase first.");
-
-    string strError = pwalletMain->SendMoneyToBitcoinAddress(address, nAmount, wtx);
-    if (strError != "")
-        throw JSONRPCError(-4, strError);
-
-    return wtx.GetHash().GetHex();
-}
-
-Value signmessage(const Array& params, bool fHelp)
-{
-    if (fHelp || params.size() != 2)
-        throw runtime_error(
-            "signmessage <bitcoinaddress> <message>\n"
-            "Sign a message with the private key of an address");
-
-    if (pwalletMain->IsLocked())
-        throw JSONRPCError(-13, "Error: Please enter the wallet passphrase with walletpassphrase first.");
-
-    string strAddress = params[0].get_str();
-    string strMessage = params[1].get_str();
-
-    CBitcoinAddress addr(strAddress);
-    if (!addr.IsValid())
-        throw JSONRPCError(-3, "Invalid address");
-
-    CKey key;
-    if (!pwalletMain->GetKey(addr, key))
-        throw JSONRPCError(-4, "Private key not available");
-
-    CDataStream ss(SER_GETHASH);
-    ss << strMessageMagic;
-    ss << strMessage;
-
-    vector<unsigned char> vchSig;
-    if (!key.SignCompact(Hash(ss.begin(), ss.end()), vchSig))
-        throw JSONRPCError(-5, "Sign failed");
-
-    return EncodeBase64(&vchSig[0], vchSig.size());
-}
-
-Value verifymessage(const Array& params, bool fHelp)
-{
-    if (fHelp || params.size() != 3)
-        throw runtime_error(
-            "verifymessage <bitcoinaddress> <signature> <message>\n"
-            "Verify a signed message");
-
-    string strAddress  = params[0].get_str();
-    string strSign     = params[1].get_str();
-    string strMessage  = params[2].get_str();
-
-    CBitcoinAddress addr(strAddress);
-    if (!addr.IsValid())
-        throw JSONRPCError(-3, "Invalid address");
-
-    bool fInvalid = false;
-    vector<unsigned char> vchSig = DecodeBase64(strSign.c_str(), &fInvalid);
-
-    if (fInvalid)
-        throw JSONRPCError(-5, "Malformed base64 encoding");
-
-    CDataStream ss(SER_GETHASH);
-    ss << strMessageMagic;
-    ss << strMessage;
-
-    CKey key;
-    if (!key.SetCompactSignature(Hash(ss.begin(), ss.end()), vchSig))
-        return false;
-
-    return (CBitcoinAddress(key.GetPubKey()) == addr);
-}
-
-
-Value getreceivedbyaddress(const Array& params, bool fHelp)
-{
-    if (fHelp || params.size() < 1 || params.size() > 2)
-        throw runtime_error(
-            "getreceivedbyaddress <i0coinaddress> [minconf=1]\n"
-            "Returns the total amount received by <i0coinaddress> in transactions with at least [minconf] confirmations.");
-
-    // I0coin address
-    CBitcoinAddress address = CBitcoinAddress(params[0].get_str());
-    CScript scriptPubKey;
-    if (!address.IsValid())
-        throw JSONRPCError(-5, "Invalid i0coin address");
-    scriptPubKey.SetBitcoinAddress(address);
-    if (!IsMine(*pwalletMain,scriptPubKey))
-        return (double)0.0;
-
-    // Minimum confirmations
-    int nMinDepth = 1;
-    if (params.size() > 1)
-        nMinDepth = params[1].get_int();
-
-    // Tally
-    int64 nAmount = 0;
-    for (map<uint256, CWalletTx>::iterator it = pwalletMain->mapWallet.begin(); it != pwalletMain->mapWallet.end(); ++it)
-    {
-        const CWalletTx& wtx = (*it).second;
-        if (wtx.IsCoinBase() || !wtx.IsFinal())
-            continue;
-
-        BOOST_FOREACH(const CTxOut& txout, wtx.vout)
-            if (txout.scriptPubKey == scriptPubKey)
-                if (wtx.GetDepthInMainChain() >= nMinDepth)
-                    nAmount += txout.nValue;
-    }
-
-    return  ValueFromAmount(nAmount);
-}
-
-
-void GetAccountAddresses(string strAccount, set<CBitcoinAddress>& setAddress)
-{
-    BOOST_FOREACH(const PAIRTYPE(CBitcoinAddress, string)& item, pwalletMain->mapAddressBook)
-    {
-        const CBitcoinAddress& address = item.first;
-        const string& strName = item.second;
-        if (strName == strAccount)
-            setAddress.insert(address);
-    }
-}
-
-
-Value getreceivedbyaccount(const Array& params, bool fHelp)
-{
-    if (fHelp || params.size() < 1 || params.size() > 2)
-        throw runtime_error(
-            "getreceivedbyaccount <account> [minconf=1]\n"
-            "Returns the total amount received by addresses with <account> in transactions with at least [minconf] confirmations.");
-
-    // Minimum confirmations
-    int nMinDepth = 1;
-    if (params.size() > 1)
-        nMinDepth = params[1].get_int();
-
-    // Get the set of pub keys assigned to account
-    string strAccount = AccountFromValue(params[0]);
-    set<CBitcoinAddress> setAddress;
-    GetAccountAddresses(strAccount, setAddress);
-
-    // Tally
-    int64 nAmount = 0;
-    for (map<uint256, CWalletTx>::iterator it = pwalletMain->mapWallet.begin(); it != pwalletMain->mapWallet.end(); ++it)
-    {
-        const CWalletTx& wtx = (*it).second;
-        if (wtx.IsCoinBase() || !wtx.IsFinal())
-            continue;
-
-        BOOST_FOREACH(const CTxOut& txout, wtx.vout)
-        {
-            CBitcoinAddress address;
-            if (ExtractAddress(txout.scriptPubKey, address) && pwalletMain->HaveKey(address) && setAddress.count(address))
-                if (wtx.GetDepthInMainChain() >= nMinDepth)
-                    nAmount += txout.nValue;
-        }
-    }
-
-    return (double)nAmount / (double)COIN;
-}
-
-
-int64 GetAccountBalance(CWalletDB& walletdb, const string& strAccount, int nMinDepth)
-{
-    int64 nBalance = 0;
-
-    // Tally wallet transactions
-    for (map<uint256, CWalletTx>::iterator it = pwalletMain->mapWallet.begin(); it != pwalletMain->mapWallet.end(); ++it)
-    {
-        const CWalletTx& wtx = (*it).second;
-        if (!wtx.IsFinal())
-            continue;
-
-        int64 nGenerated, nReceived, nSent, nFee;
-        wtx.GetAccountAmounts(strAccount, nGenerated, nReceived, nSent, nFee);
-
-        if (nReceived != 0 && wtx.GetDepthInMainChain() >= nMinDepth)
-            nBalance += nReceived;
-        nBalance += nGenerated - nSent - nFee;
-    }
-
-    // Tally internal accounting entries
-    nBalance += walletdb.GetAccountCreditDebit(strAccount);
-
-    return nBalance;
-}
-
-int64 GetAccountBalance(const string& strAccount, int nMinDepth)
-{
-    CWalletDB walletdb(pwalletMain->strWalletFile);
-    return GetAccountBalance(walletdb, strAccount, nMinDepth);
-}
-
-
-Value getbalance(const Array& params, bool fHelp)
-{
-    if (fHelp || params.size() > 2)
-        throw runtime_error(
-            "getbalance [account] [minconf=1]\n"
-            "If [account] is not specified, returns the server's total available balance.\n"
-            "If [account] is specified, returns the balance in the account.");
-
-    if (params.size() == 0)
-        return  ValueFromAmount(pwalletMain->GetBalance());
-
-    int nMinDepth = 1;
-    if (params.size() > 1)
-        nMinDepth = params[1].get_int();
-
-    if (params[0].get_str() == "*") {
-        // Calculate total balance a different way from GetBalance()
-        // (GetBalance() sums up all unspent TxOuts)
-        // getbalance and getbalance '*' should always return the same number.
-        int64 nBalance = 0;
-        for (map<uint256, CWalletTx>::iterator it = pwalletMain->mapWallet.begin(); it != pwalletMain->mapWallet.end(); ++it)
-        {
-            const CWalletTx& wtx = (*it).second;
-            if (!wtx.IsFinal())
-                continue;
-
-            int64 allGeneratedImmature, allGeneratedMature, allFee;
-            allGeneratedImmature = allGeneratedMature = allFee = 0;
-            string strSentAccount;
-            list<pair<CBitcoinAddress, int64> > listReceived;
-            list<pair<CBitcoinAddress, int64> > listSent;
-            wtx.GetAmounts(allGeneratedImmature, allGeneratedMature, listReceived, listSent, allFee, strSentAccount);
-            if (wtx.GetDepthInMainChain() >= nMinDepth)
-                BOOST_FOREACH(const PAIRTYPE(CBitcoinAddress,int64)& r, listReceived)
-                    nBalance += r.second;
-            BOOST_FOREACH(const PAIRTYPE(CBitcoinAddress,int64)& r, listSent)
-                nBalance -= r.second;
-            nBalance -= allFee;
-            nBalance += allGeneratedMature;
-        }
-        return  ValueFromAmount(nBalance);
-    }
-
-    string strAccount = AccountFromValue(params[0]);
-
-    int64 nBalance = GetAccountBalance(strAccount, nMinDepth);
-
-    return ValueFromAmount(nBalance);
-}
-
-
-Value movecmd(const Array& params, bool fHelp)
-{
-    if (fHelp || params.size() < 3 || params.size() > 5)
-        throw runtime_error(
-            "move <fromaccount> <toaccount> <amount> [minconf=1] [comment]\n"
-            "Move from one account in your wallet to another.");
-
-    string strFrom = AccountFromValue(params[0]);
-    string strTo = AccountFromValue(params[1]);
-    int64 nAmount = AmountFromValue(params[2]);
-    if (params.size() > 3)
-        // unused parameter, used to be nMinDepth, keep type-checking it though
-        (void)params[3].get_int();
-    string strComment;
-    if (params.size() > 4)
-        strComment = params[4].get_str();
-
-    CWalletDB walletdb(pwalletMain->strWalletFile);
-    walletdb.TxnBegin();
-
-    int64 nNow = GetAdjustedTime();
-
-    // Debit
-    CAccountingEntry debit;
-    debit.strAccount = strFrom;
-    debit.nCreditDebit = -nAmount;
-    debit.nTime = nNow;
-    debit.strOtherAccount = strTo;
-    debit.strComment = strComment;
-    walletdb.WriteAccountingEntry(debit);
-
-    // Credit
-    CAccountingEntry credit;
-    credit.strAccount = strTo;
-    credit.nCreditDebit = nAmount;
-    credit.nTime = nNow;
-    credit.strOtherAccount = strFrom;
-    credit.strComment = strComment;
-    walletdb.WriteAccountingEntry(credit);
-
-    walletdb.TxnCommit();
-
-    return true;
-}
-
-
-Value sendfrom(const Array& params, bool fHelp)
-{
-    if (pwalletMain->IsCrypted() && (fHelp || params.size() < 3 || params.size() > 6))
-        throw runtime_error(
-            "sendfrom <fromaccount> <toi0coinaddress> <amount> [minconf=1] [comment] [comment-to]\n"
-            "<amount> is a real and is rounded to the nearest 0.00000001\n"
-            "requires wallet passphrase to be set with walletpassphrase first");
-    if (!pwalletMain->IsCrypted() && (fHelp || params.size() < 3 || params.size() > 6))
-        throw runtime_error(
-            "sendfrom <fromaccount> <toi0coinaddress> <amount> [minconf=1] [comment] [comment-to]\n"
-            "<amount> is a real and is rounded to the nearest 0.00000001");
-
-    string strAccount = AccountFromValue(params[0]);
-    CBitcoinAddress address(params[1].get_str());
-    if (!address.IsValid())
-        throw JSONRPCError(-5, "Invalid i0coin address");
-    int64 nAmount = AmountFromValue(params[2]);
-    int nMinDepth = 1;
-    if (params.size() > 3)
-        nMinDepth = params[3].get_int();
-
-    CWalletTx wtx;
-    wtx.strFromAccount = strAccount;
-    if (params.size() > 4 && params[4].type() != null_type && !params[4].get_str().empty())
-        wtx.mapValue["comment"] = params[4].get_str();
-    if (params.size() > 5 && params[5].type() != null_type && !params[5].get_str().empty())
-        wtx.mapValue["to"]      = params[5].get_str();
-
-    if (pwalletMain->IsLocked())
-        throw JSONRPCError(-13, "Error: Please enter the wallet passphrase with walletpassphrase first.");
-
-    // Check funds
-    int64 nBalance = GetAccountBalance(strAccount, nMinDepth);
-    if (nAmount > nBalance)
-        throw JSONRPCError(-6, "Account has insufficient funds");
-
-    // Send
-    string strError = pwalletMain->SendMoneyToBitcoinAddress(address, nAmount, wtx);
-    if (strError != "")
-        throw JSONRPCError(-4, strError);
-
-    return wtx.GetHash().GetHex();
-}
-
-
-Value sendmany(const Array& params, bool fHelp)
-{
-    if (pwalletMain->IsCrypted() && (fHelp || params.size() < 2 || params.size() > 4))
-        throw runtime_error(
-            "sendmany <fromaccount> {address:amount,...} [minconf=1] [comment]\n"
-            "amounts are double-precision floating point numbers\n"
-            "requires wallet passphrase to be set with walletpassphrase first");
-    if (!pwalletMain->IsCrypted() && (fHelp || params.size() < 2 || params.size() > 4))
-        throw runtime_error(
-            "sendmany <fromaccount> {address:amount,...} [minconf=1] [comment]\n"
-            "amounts are double-precision floating point numbers");
-
-    string strAccount = AccountFromValue(params[0]);
-    Object sendTo = params[1].get_obj();
-    int nMinDepth = 1;
-    if (params.size() > 2)
-        nMinDepth = params[2].get_int();
-
-    CWalletTx wtx;
-    wtx.strFromAccount = strAccount;
-    if (params.size() > 3 && params[3].type() != null_type && !params[3].get_str().empty())
-        wtx.mapValue["comment"] = params[3].get_str();
-
-    set<CBitcoinAddress> setAddress;
-    vector<pair<CScript, int64> > vecSend;
-
-    int64 totalAmount = 0;
-    BOOST_FOREACH(const Pair& s, sendTo)
-    {
-        CBitcoinAddress address(s.name_);
-        if (!address.IsValid())
-            throw JSONRPCError(-5, string("Invalid i0coin address:")+s.name_);
-
-        if (setAddress.count(address))
-            throw JSONRPCError(-8, string("Invalid parameter, duplicated address: ")+s.name_);
-        setAddress.insert(address);
-
-        CScript scriptPubKey;
-        scriptPubKey.SetBitcoinAddress(address);
-        int64 nAmount = AmountFromValue(s.value_); 
-        totalAmount += nAmount;
-
-        vecSend.push_back(make_pair(scriptPubKey, nAmount));
-    }
-
-    if (pwalletMain->IsLocked())
-        throw JSONRPCError(-13, "Error: Please enter the wallet passphrase with walletpassphrase first.");
-
-    // Check funds
-    int64 nBalance = GetAccountBalance(strAccount, nMinDepth);
-    if (totalAmount > nBalance)
-        throw JSONRPCError(-6, "Account has insufficient funds");
-
-    // Send
-    CReserveKey keyChange(pwalletMain);
-    int64 nFeeRequired = 0;
-    bool fCreated = pwalletMain->CreateTransaction(vecSend, wtx, keyChange, nFeeRequired);
-    if (!fCreated)
-    {
-        if (totalAmount + nFeeRequired > pwalletMain->GetBalance())
-            throw JSONRPCError(-6, "Insufficient funds");
-        throw JSONRPCError(-4, "Transaction creation failed");
-    }
-    if (!pwalletMain->CommitTransaction(wtx, keyChange))
-        throw JSONRPCError(-4, "Transaction commit failed");
-
-    return wtx.GetHash().GetHex();
-}
-
-Value addmultisigaddress(const Array& params, bool fHelp)
-{
-    if (fHelp || params.size() < 2 || params.size() > 3)
-    {
-        string msg = "addmultisigaddress <nrequired> <'[\"key\",\"key\"]'> [account]\n"
-            "Add a nrequired-to-sign multisignature address to the wallet\"\n"
-            "each key is a bitcoin address or hex-encoded public key\n"
-            "If [account] is specified, assign address to [account].";
-        throw runtime_error(msg);
-    }
-    if (!fTestNet)
-        throw runtime_error("addmultisigaddress available only when running -testnet\n");
-
-    int nRequired = params[0].get_int();
-    const Array& keys = params[1].get_array();
-    string strAccount;
-    if (params.size() > 2)
-        strAccount = AccountFromValue(params[2]);
-
-    // Gather public keys
-    if (nRequired < 1 || keys.size() < nRequired)
-        throw runtime_error(
-            strprintf("wrong number of keys"
-                      "(got %d, need at least %d)", keys.size(), nRequired));
-    std::vector<CKey> pubkeys;
-    pubkeys.resize(keys.size());
-    for (int i = 0; i < keys.size(); i++)
-    {
-        const std::string& ks = keys[i].get_str();
-
-        // Case 1: bitcoin address and we have full public key:
-        CBitcoinAddress address(ks);
-        if (address.IsValid())
-        {
-            if (address.IsScript())
-                throw runtime_error(
-                    strprintf("%s is a pay-to-script address",ks.c_str()));
-            std::vector<unsigned char> vchPubKey;
-            if (!pwalletMain->GetPubKey(address, vchPubKey))
-                throw runtime_error(
-                    strprintf("no full public key for address %s",ks.c_str()));
-            if (vchPubKey.empty() || !pubkeys[i].SetPubKey(vchPubKey))
-                throw runtime_error(" Invalid public key: "+ks);
-        }
-
-        // Case 2: hex public key
-        else if (IsHex(ks))
-        {
-            vector<unsigned char> vchPubKey = ParseHex(ks);
-            if (vchPubKey.empty() || !pubkeys[i].SetPubKey(vchPubKey))
-                throw runtime_error(" Invalid public key: "+ks);
-        }
-        else
-        {
-            throw runtime_error(" Invalid public key: "+ks);
-        }
-    }
-
-    // Construct using pay-to-script-hash:
-    CScript inner;
-    inner.SetMultisig(nRequired, pubkeys);
-
-    uint160 scriptHash = Hash160(inner);
-    CScript scriptPubKey;
-    scriptPubKey.SetPayToScriptHash(inner);
-    pwalletMain->AddCScript(inner);
-    CBitcoinAddress address;
-    address.SetScriptHash160(scriptHash);
-
-    pwalletMain->SetAddressBookName(address, strAccount);
-    return address.ToString();
-}
-
-
-struct tallyitem
-{
-    int64 nAmount;
-    int nConf;
-    tallyitem()
-    {
-        nAmount = 0;
-        nConf = std::numeric_limits<int>::max();
-    }
-};
-
-Value ListReceived(const Array& params, bool fByAccounts)
-{
-    // Minimum confirmations
-    int nMinDepth = 1;
-    if (params.size() > 0)
-        nMinDepth = params[0].get_int();
-
-    // Whether to include empty accounts
-    bool fIncludeEmpty = false;
-    if (params.size() > 1)
-        fIncludeEmpty = params[1].get_bool();
-
-    // Tally
-    map<CBitcoinAddress, tallyitem> mapTally;
-    for (map<uint256, CWalletTx>::iterator it = pwalletMain->mapWallet.begin(); it != pwalletMain->mapWallet.end(); ++it)
-    {
-        const CWalletTx& wtx = (*it).second;
-
-        if (wtx.IsCoinBase() || !wtx.IsFinal())
-            continue;
-
-        int nDepth = wtx.GetDepthInMainChain();
-        if (nDepth < nMinDepth)
-            continue;
-
-        BOOST_FOREACH(const CTxOut& txout, wtx.vout)
-        {
-            CBitcoinAddress address;
-            if (!ExtractAddress(txout.scriptPubKey, address) || !pwalletMain->HaveKey(address) || !address.IsValid())
-                continue;
-
-            tallyitem& item = mapTally[address];
-            item.nAmount += txout.nValue;
-            item.nConf = min(item.nConf, nDepth);
-        }
-    }
-
-    // Reply
-    Array ret;
-    map<string, tallyitem> mapAccountTally;
-    BOOST_FOREACH(const PAIRTYPE(CBitcoinAddress, string)& item, pwalletMain->mapAddressBook)
-    {
-        const CBitcoinAddress& address = item.first;
-        const string& strAccount = item.second;
-        map<CBitcoinAddress, tallyitem>::iterator it = mapTally.find(address);
-        if (it == mapTally.end() && !fIncludeEmpty)
-            continue;
-
-        int64 nAmount = 0;
-        int nConf = std::numeric_limits<int>::max();
-        if (it != mapTally.end())
-        {
-            nAmount = (*it).second.nAmount;
-            nConf = (*it).second.nConf;
-        }
-
-        if (fByAccounts)
-        {
-            tallyitem& item = mapAccountTally[strAccount];
-            item.nAmount += nAmount;
-            item.nConf = min(item.nConf, nConf);
-        }
-        else
-        {
-            Object obj;
-            obj.push_back(Pair("address",       address.ToString()));
-            obj.push_back(Pair("account",       strAccount));
-            obj.push_back(Pair("amount",        ValueFromAmount(nAmount)));
-            obj.push_back(Pair("confirmations", (nConf == std::numeric_limits<int>::max() ? 0 : nConf)));
-            ret.push_back(obj);
-        }
-    }
-
-    if (fByAccounts)
-    {
-        for (map<string, tallyitem>::iterator it = mapAccountTally.begin(); it != mapAccountTally.end(); ++it)
-        {
-            int64 nAmount = (*it).second.nAmount;
-            int nConf = (*it).second.nConf;
-            Object obj;
-            obj.push_back(Pair("account",       (*it).first));
-            obj.push_back(Pair("amount",        ValueFromAmount(nAmount)));
-            obj.push_back(Pair("confirmations", (nConf == std::numeric_limits<int>::max() ? 0 : nConf)));
-            ret.push_back(obj);
-        }
-    }
-
-    return ret;
-}
-
-Value listreceivedbyaddress(const Array& params, bool fHelp)
-{
-    if (fHelp || params.size() > 2)
-        throw runtime_error(
-            "listreceivedbyaddress [minconf=1] [includeempty=false]\n"
-            "[minconf] is the minimum number of confirmations before payments are included.\n"
-            "[includeempty] whether to include addresses that haven't received any payments.\n"
-            "Returns an array of objects containing:\n"
-            "  \"address\" : receiving address\n"
-            "  \"account\" : the account of the receiving address\n"
-            "  \"amount\" : total amount received by the address\n"
-            "  \"confirmations\" : number of confirmations of the most recent transaction included");
-
-    return ListReceived(params, false);
-}
-
-Value listreceivedbyaccount(const Array& params, bool fHelp)
-{
-    if (fHelp || params.size() > 2)
-        throw runtime_error(
-            "listreceivedbyaccount [minconf=1] [includeempty=false]\n"
-            "[minconf] is the minimum number of confirmations before payments are included.\n"
-            "[includeempty] whether to include accounts that haven't received any payments.\n"
-            "Returns an array of objects containing:\n"
-            "  \"account\" : the account of the receiving addresses\n"
-            "  \"amount\" : total amount received by addresses with this account\n"
-            "  \"confirmations\" : number of confirmations of the most recent transaction included");
-
-    return ListReceived(params, true);
-}
-
-void ListTransactions(const CWalletTx& wtx, const string& strAccount, int nMinDepth, bool fLong, Array& ret)
-{
-    int64 nGeneratedImmature, nGeneratedMature, nFee;
-    string strSentAccount;
-    list<pair<CBitcoinAddress, int64> > listReceived;
-    list<pair<CBitcoinAddress, int64> > listSent;
-
-    wtx.GetAmounts(nGeneratedImmature, nGeneratedMature, listReceived, listSent, nFee, strSentAccount);
-
-    bool fAllAccounts = (strAccount == string("*"));
-
-    // Generated blocks assigned to account ""
-    if ((nGeneratedMature+nGeneratedImmature) != 0 && (fAllAccounts || strAccount == ""))
-    {
-        Object entry;
-        entry.push_back(Pair("account", string("")));
-        if (nGeneratedImmature)
-        {
-            entry.push_back(Pair("category", wtx.GetDepthInMainChain() ? "immature" : "orphan"));
-            entry.push_back(Pair("amount", ValueFromAmount(nGeneratedImmature)));
-        }
-        else
-        {
-            entry.push_back(Pair("category", "generate"));
-            entry.push_back(Pair("amount", ValueFromAmount(nGeneratedMature)));
-        }
-        if (fLong)
-            WalletTxToJSON(wtx, entry);
-        ret.push_back(entry);
-    }
-
-    // Sent
-    if ((!listSent.empty() || nFee != 0) && (fAllAccounts || strAccount == strSentAccount))
-    {
-        BOOST_FOREACH(const PAIRTYPE(CBitcoinAddress, int64)& s, listSent)
-        {
-            Object entry;
-            entry.push_back(Pair("account", strSentAccount));
-            entry.push_back(Pair("address", s.first.ToString()));
-            entry.push_back(Pair("category", "send"));
-            entry.push_back(Pair("amount", ValueFromAmount(-s.second)));
-            entry.push_back(Pair("fee", ValueFromAmount(-nFee)));
-            if (fLong)
-                WalletTxToJSON(wtx, entry);
-            ret.push_back(entry);
-        }
-    }
-
-    // Received
-    if (listReceived.size() > 0 && wtx.GetDepthInMainChain() >= nMinDepth)
-        BOOST_FOREACH(const PAIRTYPE(CBitcoinAddress, int64)& r, listReceived)
-        {
-            string account;
-            if (pwalletMain->mapAddressBook.count(r.first))
-                account = pwalletMain->mapAddressBook[r.first];
-            if (fAllAccounts || (account == strAccount))
-            {
-                Object entry;
-                entry.push_back(Pair("account", account));
-                entry.push_back(Pair("address", r.first.ToString()));
-                entry.push_back(Pair("category", "receive"));
-                entry.push_back(Pair("amount", ValueFromAmount(r.second)));
-                if (fLong)
-                    WalletTxToJSON(wtx, entry);
-                ret.push_back(entry);
-            }
-        }
-}
-
-void AcentryToJSON(const CAccountingEntry& acentry, const string& strAccount, Array& ret)
-{
-    bool fAllAccounts = (strAccount == string("*"));
-
-    if (fAllAccounts || acentry.strAccount == strAccount)
-    {
-        Object entry;
-        entry.push_back(Pair("account", acentry.strAccount));
-        entry.push_back(Pair("category", "move"));
-        entry.push_back(Pair("time", (boost::int64_t)acentry.nTime));
-        entry.push_back(Pair("amount", ValueFromAmount(acentry.nCreditDebit)));
-        entry.push_back(Pair("otheraccount", acentry.strOtherAccount));
-        entry.push_back(Pair("comment", acentry.strComment));
-        ret.push_back(entry);
-    }
-}
-
-Value listtransactions(const Array& params, bool fHelp)
-{
-    if (fHelp || params.size() > 3)
-        throw runtime_error(
-            "listtransactions [account] [count=10] [from=0]\n"
-            "Returns up to [count] most recent transactions skipping the first [from] transactions for account [account].");
-
-    string strAccount = "*";
-    if (params.size() > 0)
-        strAccount = params[0].get_str();
-    int nCount = 10;
-    if (params.size() > 1)
-        nCount = params[1].get_int();
-    int nFrom = 0;
-    if (params.size() > 2)
-        nFrom = params[2].get_int();
-
-    Array ret;
-    CWalletDB walletdb(pwalletMain->strWalletFile);
-
-    // Firs: get all CWalletTx and CAccountingEntry into a sorted-by-time multimap:
-    typedef pair<CWalletTx*, CAccountingEntry*> TxPair;
-    typedef multimap<int64, TxPair > TxItems;
-    TxItems txByTime;
-
-    for (map<uint256, CWalletTx>::iterator it = pwalletMain->mapWallet.begin(); it != pwalletMain->mapWallet.end(); ++it)
-    {
-        CWalletTx* wtx = &((*it).second);
-        txByTime.insert(make_pair(wtx->GetTxTime(), TxPair(wtx, (CAccountingEntry*)0)));
-    }
-    list<CAccountingEntry> acentries;
-    walletdb.ListAccountCreditDebit(strAccount, acentries);
-    BOOST_FOREACH(CAccountingEntry& entry, acentries)
-    {
-        txByTime.insert(make_pair(entry.nTime, TxPair((CWalletTx*)0, &entry)));
-    }
-
-    // Now: iterate backwards until we have nCount items to return:
-    TxItems::reverse_iterator it = txByTime.rbegin();
-    if (txByTime.size() > nFrom) std::advance(it, nFrom);
-    for (; it != txByTime.rend(); ++it)
-    {
-        CWalletTx *const pwtx = (*it).second.first;
-        if (pwtx != 0)
-            ListTransactions(*pwtx, strAccount, 0, true, ret);
-        CAccountingEntry *const pacentry = (*it).second.second;
-        if (pacentry != 0)
-            AcentryToJSON(*pacentry, strAccount, ret);
-
-        if (ret.size() >= nCount) break;
-    }
-    // ret is now newest to oldest
-    
-    // Make sure we return only last nCount items (sends-to-self might give us an extra):
-    if (ret.size() > nCount)
-    {
-        Array::iterator last = ret.begin();
-        std::advance(last, nCount);
-        ret.erase(last, ret.end());
-    }
-    std::reverse(ret.begin(), ret.end()); // oldest to newest
-
-    return ret;
-}
-
-Value listaccounts(const Array& params, bool fHelp)
-{
-    if (fHelp || params.size() > 1)
-        throw runtime_error(
-            "listaccounts [minconf=1]\n"
-            "Returns Object that has account names as keys, account balances as values.");
-
-    int nMinDepth = 1;
-    if (params.size() > 0)
-        nMinDepth = params[0].get_int();
-
-    map<string, int64> mapAccountBalances;
-    BOOST_FOREACH(const PAIRTYPE(CBitcoinAddress, string)& entry, pwalletMain->mapAddressBook) {
-        if (pwalletMain->HaveKey(entry.first)) // This address belongs to me
-            mapAccountBalances[entry.second] = 0;
-    }
-
-    for (map<uint256, CWalletTx>::iterator it = pwalletMain->mapWallet.begin(); it != pwalletMain->mapWallet.end(); ++it)
-    {
-        const CWalletTx& wtx = (*it).second;
-        int64 nGeneratedImmature, nGeneratedMature, nFee;
-        string strSentAccount;
-        list<pair<CBitcoinAddress, int64> > listReceived;
-        list<pair<CBitcoinAddress, int64> > listSent;
-        wtx.GetAmounts(nGeneratedImmature, nGeneratedMature, listReceived, listSent, nFee, strSentAccount);
-        mapAccountBalances[strSentAccount] -= nFee;
-        BOOST_FOREACH(const PAIRTYPE(CBitcoinAddress, int64)& s, listSent)
-            mapAccountBalances[strSentAccount] -= s.second;
-        if (wtx.GetDepthInMainChain() >= nMinDepth)
-        {
-            mapAccountBalances[""] += nGeneratedMature;
-            BOOST_FOREACH(const PAIRTYPE(CBitcoinAddress, int64)& r, listReceived)
-                if (pwalletMain->mapAddressBook.count(r.first))
-                    mapAccountBalances[pwalletMain->mapAddressBook[r.first]] += r.second;
-                else
-                    mapAccountBalances[""] += r.second;
-        }
-    }
-
-    list<CAccountingEntry> acentries;
-    CWalletDB(pwalletMain->strWalletFile).ListAccountCreditDebit("*", acentries);
-    BOOST_FOREACH(const CAccountingEntry& entry, acentries)
-        mapAccountBalances[entry.strAccount] += entry.nCreditDebit;
-
-    Object ret;
-    BOOST_FOREACH(const PAIRTYPE(string, int64)& accountBalance, mapAccountBalances) {
-        ret.push_back(Pair(accountBalance.first, ValueFromAmount(accountBalance.second)));
-    }
-    return ret;
-}
-
-Value listsinceblock(const Array& params, bool fHelp)
-{
-    if (fHelp)
-        throw runtime_error(
-            "listsinceblock [blockid] [target-confirmations]\n"
-            "Get all transactions in blocks since block [blockid], or all transactions if omitted");
-
-    CBlockIndex *pindex = NULL;
-    int target_confirms = 1;
-
-    if (params.size() > 0)
-    {
-        uint256 blockId = 0;
-
-        blockId.SetHex(params[0].get_str());
-        pindex = CBlockLocator(blockId).GetBlockIndex();
-    }
-
-    if (params.size() > 1)
-    {
-        target_confirms = params[1].get_int();
-
-        if (target_confirms < 1)
-            throw JSONRPCError(-8, "Invalid parameter");
-    }
-
-    int depth = pindex ? (1 + nBestHeight - pindex->nHeight) : -1;
-
-    Array transactions;
-
-    for (map<uint256, CWalletTx>::iterator it = pwalletMain->mapWallet.begin(); it != pwalletMain->mapWallet.end(); it++)
-    {
-        CWalletTx tx = (*it).second;
-
-        if (depth == -1 || tx.GetDepthInMainChain() < depth)
-            ListTransactions(tx, "*", 0, true, transactions);
-    }
-
-    uint256 lastblock;
-
-    if (target_confirms == 1)
-    {
-        printf("oops!\n");
-        lastblock = hashBestChain;
-    }
-    else
-    {
-        int target_height = pindexBest->nHeight + 1 - target_confirms;
-
-        CBlockIndex *block;
-        for (block = pindexBest;
-             block && block->nHeight > target_height;
-             block = block->pprev)  { }
-
-        lastblock = block ? block->GetBlockHash() : 0;
-    }
-
-    Object ret;
-    ret.push_back(Pair("transactions", transactions));
-    ret.push_back(Pair("lastblock", lastblock.GetHex()));
-
-    return ret;
-}
-
-Value gettransaction(const Array& params, bool fHelp)
-{
-    if (fHelp || params.size() != 1)
-        throw runtime_error(
-            "gettransaction <txid>\n"
-            "Get detailed information about <txid>");
-
-    uint256 hash;
-    hash.SetHex(params[0].get_str());
-
-    Object entry;
-
-    if (!pwalletMain->mapWallet.count(hash))
-        throw JSONRPCError(-5, "Invalid or non-wallet transaction id");
-    const CWalletTx& wtx = pwalletMain->mapWallet[hash];
-
-    int64 nCredit = wtx.GetCredit();
-    int64 nDebit = wtx.GetDebit();
-    int64 nNet = nCredit - nDebit;
-    int64 nFee = (wtx.IsFromMe() ? wtx.GetValueOut() - nDebit : 0);
-
-    entry.push_back(Pair("amount", ValueFromAmount(nNet - nFee)));
-    if (wtx.IsFromMe())
-        entry.push_back(Pair("fee", ValueFromAmount(nFee)));
-
-    WalletTxToJSON(pwalletMain->mapWallet[hash], entry);
-
-    Array details;
-    ListTransactions(pwalletMain->mapWallet[hash], "*", 0, false, details);
-    entry.push_back(Pair("details", details));
-
-    return entry;
-}
-
-
-Value backupwallet(const Array& params, bool fHelp)
-{
-    if (fHelp || params.size() != 1)
-        throw runtime_error(
-            "backupwallet <destination>\n"
-            "Safely copies wallet.dat to destination, which can be a directory or a path with filename.");
-
-    string strDest = params[0].get_str();
-    BackupWallet(*pwalletMain, strDest);
-
-    return Value::null;
-}
-
-
-Value keypoolrefill(const Array& params, bool fHelp)
-{
-    if (pwalletMain->IsCrypted() && (fHelp || params.size() > 0))
-        throw runtime_error(
-            "keypoolrefill\n"
-            "Fills the keypool, requires wallet passphrase to be set.");
-    if (!pwalletMain->IsCrypted() && (fHelp || params.size() > 0))
-        throw runtime_error(
-            "keypoolrefill\n"
-            "Fills the keypool.");
-
-    if (pwalletMain->IsLocked())
-        throw JSONRPCError(-13, "Error: Please enter the wallet passphrase with walletpassphrase first.");
-
-    pwalletMain->TopUpKeyPool();
-
-    if (pwalletMain->GetKeyPoolSize() < GetArg("-keypool", 100))
-        throw JSONRPCError(-4, "Error refreshing keypool.");
-
-    return Value::null;
-}
-
-
-void ThreadTopUpKeyPool(void* parg)
-{
-    pwalletMain->TopUpKeyPool();
-}
-
-void ThreadCleanWalletPassphrase(void* parg)
-{
-    int64 nMyWakeTime = GetTimeMillis() + *((int64*)parg) * 1000;
-
-    ENTER_CRITICAL_SECTION(cs_nWalletUnlockTime);
-
-    if (nWalletUnlockTime == 0)
-    {
-        nWalletUnlockTime = nMyWakeTime;
-
-        do
-        {
-            if (nWalletUnlockTime==0)
-                break;
-            int64 nToSleep = nWalletUnlockTime - GetTimeMillis();
-            if (nToSleep <= 0)
-                break;
-
-            LEAVE_CRITICAL_SECTION(cs_nWalletUnlockTime);
-            Sleep(nToSleep);
-            ENTER_CRITICAL_SECTION(cs_nWalletUnlockTime);
-
-        } while(1);
-
-        if (nWalletUnlockTime)
-        {
-            nWalletUnlockTime = 0;
-            pwalletMain->Lock();
-        }
-    }
-    else
-    {
-        if (nWalletUnlockTime < nMyWakeTime)
-            nWalletUnlockTime = nMyWakeTime;
-    }
-
-    LEAVE_CRITICAL_SECTION(cs_nWalletUnlockTime);
-
-    delete (int64*)parg;
-}
-
-Value walletpassphrase(const Array& params, bool fHelp)
-{
-    if (pwalletMain->IsCrypted() && (fHelp || params.size() != 2))
-        throw runtime_error(
-            "walletpassphrase <passphrase> <timeout>\n"
-            "Stores the wallet decryption key in memory for <timeout> seconds.");
-    if (fHelp)
-        return true;
-    if (!pwalletMain->IsCrypted())
-        throw JSONRPCError(-15, "Error: running with an unencrypted wallet, but walletpassphrase was called.");
-
-    if (!pwalletMain->IsLocked())
-        throw JSONRPCError(-17, "Error: Wallet is already unlocked.");
-
-    // Note that the walletpassphrase is stored in params[0] which is not mlock()ed
-    SecureString strWalletPass;
-    strWalletPass.reserve(100);
-    // TODO: get rid of this .c_str() by implementing SecureString::operator=(std::string)
-    // Alternately, find a way to make params[0] mlock()'d to begin with.
-    strWalletPass = params[0].get_str().c_str();
-
-    if (strWalletPass.length() > 0)
-    {
-        if (!pwalletMain->Unlock(strWalletPass))
-            throw JSONRPCError(-14, "Error: The wallet passphrase entered was incorrect.");
-    }
-    else
-        throw runtime_error(
-            "walletpassphrase <passphrase> <timeout>\n"
-            "Stores the wallet decryption key in memory for <timeout> seconds.");
-
-    CreateThread(ThreadTopUpKeyPool, NULL);
-    int64* pnSleepTime = new int64(params[1].get_int64());
-    CreateThread(ThreadCleanWalletPassphrase, pnSleepTime);
-
-    return Value::null;
-}
-
-
-Value walletpassphrasechange(const Array& params, bool fHelp)
-{
-    if (pwalletMain->IsCrypted() && (fHelp || params.size() != 2))
-        throw runtime_error(
-            "walletpassphrasechange <oldpassphrase> <newpassphrase>\n"
-            "Changes the wallet passphrase from <oldpassphrase> to <newpassphrase>.");
-    if (fHelp)
-        return true;
-    if (!pwalletMain->IsCrypted())
-        throw JSONRPCError(-15, "Error: running with an unencrypted wallet, but walletpassphrasechange was called.");
-
-    // TODO: get rid of these .c_str() calls by implementing SecureString::operator=(std::string)
-    // Alternately, find a way to make params[0] mlock()'d to begin with.
-    SecureString strOldWalletPass;
-    strOldWalletPass.reserve(100);
-    strOldWalletPass = params[0].get_str().c_str();
-
-    SecureString strNewWalletPass;
-    strNewWalletPass.reserve(100);
-    strNewWalletPass = params[1].get_str().c_str();
-
-    if (strOldWalletPass.length() < 1 || strNewWalletPass.length() < 1)
-        throw runtime_error(
-            "walletpassphrasechange <oldpassphrase> <newpassphrase>\n"
-            "Changes the wallet passphrase from <oldpassphrase> to <newpassphrase>.");
-
-    if (!pwalletMain->ChangeWalletPassphrase(strOldWalletPass, strNewWalletPass))
-        throw JSONRPCError(-14, "Error: The wallet passphrase entered was incorrect.");
-
-    return Value::null;
-}
-
-
-Value walletlock(const Array& params, bool fHelp)
-{
-    if (pwalletMain->IsCrypted() && (fHelp || params.size() != 0))
-        throw runtime_error(
-            "walletlock\n"
-            "Removes the wallet encryption key from memory, locking the wallet.\n"
-            "After calling this method, you will need to call walletpassphrase again\n"
-            "before being able to call any methods which require the wallet to be unlocked.");
-    if (fHelp)
-        return true;
-    if (!pwalletMain->IsCrypted())
-        throw JSONRPCError(-15, "Error: running with an unencrypted wallet, but walletlock was called.");
-
-    CRITICAL_BLOCK(cs_nWalletUnlockTime)
-    {
-        pwalletMain->Lock();
-        nWalletUnlockTime = 0;
-    }
-
-    return Value::null;
-}
-
-
-Value encryptwallet(const Array& params, bool fHelp)
-{
-    if (!pwalletMain->IsCrypted() && (fHelp || params.size() != 1))
-        throw runtime_error(
-            "encryptwallet <passphrase>\n"
-            "Encrypts the wallet with <passphrase>.");
-    if (fHelp)
-        return true;
-    if (pwalletMain->IsCrypted())
-        throw JSONRPCError(-15, "Error: running with an encrypted wallet, but encryptwallet was called.");
-
-#ifdef QT_GUI
-    // shutting down via RPC while the GUI is running does not work (yet):
-    throw runtime_error("Not Yet Implemented: use GUI to encrypt wallet, not RPC command");
-#endif
-
-    // TODO: get rid of this .c_str() by implementing SecureString::operator=(std::string)
-    // Alternately, find a way to make params[0] mlock()'d to begin with.
-    SecureString strWalletPass;
-    strWalletPass.reserve(100);
-    strWalletPass = params[0].get_str().c_str();
-
-    if (strWalletPass.length() < 1)
-        throw runtime_error(
-            "encryptwallet <passphrase>\n"
-            "Encrypts the wallet with <passphrase>.");
-
-    if (!pwalletMain->EncryptWallet(strWalletPass))
-        throw JSONRPCError(-16, "Error: Failed to encrypt the wallet.");
-
-    // BDB seems to have a bad habit of writing old data into
-    // slack space in .dat files; that is bad if the old data is
-    // unencrypted private keys.  So:
-    CreateThread(Shutdown, NULL);
-    return "wallet encrypted; bitcoin server stopping, restart to run with encrypted wallet";
-}
-
-
-Value validateaddress(const Array& params, bool fHelp)
-{
-    if (fHelp || params.size() != 1)
-        throw runtime_error(
-            "validateaddress <i0coinaddress>\n"
-            "Return information about <i0coinaddress>.");
-
-    CBitcoinAddress address(params[0].get_str());
-    bool isValid = address.IsValid();
-
-    Object ret;
-    ret.push_back(Pair("isvalid", isValid));
-    if (isValid)
-    {
-        // Call Hash160ToAddress() so we always return current ADDRESSVERSION
-        // version of the address:
-        string currentAddress = address.ToString();
-        ret.push_back(Pair("address", currentAddress));
-        if (pwalletMain->HaveKey(address))
-        {
-            ret.push_back(Pair("ismine", true));
-            std::vector<unsigned char> vchPubKey;
-            pwalletMain->GetPubKey(address, vchPubKey);
-            ret.push_back(Pair("pubkey", HexStr(vchPubKey)));
-            CKey key;
-            key.SetPubKey(vchPubKey);
-            ret.push_back(Pair("iscompressed", key.IsCompressed()));
-        }
-        else if (pwalletMain->HaveCScript(address.GetHash160()))
-        {
-            ret.push_back(Pair("isscript", true));
-            CScript subscript;
-            pwalletMain->GetCScript(address.GetHash160(), subscript);
-            ret.push_back(Pair("ismine", ::IsMine(*pwalletMain, subscript)));
-            std::vector<CBitcoinAddress> addresses;
-            txnouttype whichType;
-            int nRequired;
-            ExtractAddresses(subscript, whichType, addresses, nRequired);
-            ret.push_back(Pair("script", GetTxnOutputType(whichType)));
-            Array a;
-            BOOST_FOREACH(const CBitcoinAddress& addr, addresses)
-                a.push_back(addr.ToString());
-            ret.push_back(Pair("addresses", a));
-            if (whichType == TX_MULTISIG)
-                ret.push_back(Pair("sigsrequired", nRequired));
-        }
-        else
-            ret.push_back(Pair("ismine", false));
-        if (pwalletMain->mapAddressBook.count(address))
-            ret.push_back(Pair("account", pwalletMain->mapAddressBook[address]));
-    }
-    return ret;
-}
-
-Value getwork(const Array& params, bool fHelp)
-{
-    if (fHelp || params.size() > 1)
-        throw runtime_error(
-            "getwork [data]\n"
-            "If [data] is not specified, returns formatted hash data to work on:\n"
-            "  \"midstate\" : precomputed hash state after hashing the first half of the data (DEPRECATED)\n" // deprecated
-            "  \"data\" : block data\n"
-            "  \"hash1\" : formatted hash buffer for second hash (DEPRECATED)\n" // deprecated
-            "  \"target\" : little endian hash target\n"
-            "If [data] is specified, tries to solve the block and returns true if it was successful.");
-
-    if (vNodes.empty())
-        throw JSONRPCError(-9, "I0coin is not connected!");
-
-    if (IsInitialBlockDownload())
-        throw JSONRPCError(-10, "I0coin is downloading blocks...");
-
-    typedef map<uint256, pair<CBlock*, CScript> > mapNewBlock_t;
-    static mapNewBlock_t mapNewBlock;
-    static vector<CBlock*> vNewBlock;
-    static CReserveKey reservekey(pwalletMain);
-
-    if (params.size() == 0)
-    {
-        // Update block
-        static unsigned int nTransactionsUpdatedLast;
-        static CBlockIndex* pindexPrev;
-        static int64 nStart;
-        static CBlock* pblock;
-        if (pindexPrev != pindexBest ||
-            (nTransactionsUpdated != nTransactionsUpdatedLast && GetTime() - nStart > 60))
-        {
-            if (pindexPrev != pindexBest)
-            {
-                // Deallocate old blocks since they're obsolete now
-                mapNewBlock.clear();
-                BOOST_FOREACH(CBlock* pblock, vNewBlock)
-                    delete pblock;
-                vNewBlock.clear();
-            }
-            nTransactionsUpdatedLast = nTransactionsUpdated;
-            pindexPrev = pindexBest;
-            nStart = GetTime();
-
-            // Create new block
-            pblock = CreateNewBlock(reservekey);
-            if (!pblock)
-                throw JSONRPCError(-7, "Out of memory");
-            vNewBlock.push_back(pblock);
-        }
-
-        // Update nTime
-        pblock->UpdateTime(pindexPrev);
-        pblock->nNonce = 0;
-
-        // Update nExtraNonce
-        static unsigned int nExtraNonce = 0;
-        IncrementExtraNonce(pblock, pindexPrev, nExtraNonce);
-
-        // Save
-        mapNewBlock[pblock->hashMerkleRoot] = make_pair(pblock, pblock->vtx[0].vin[0].scriptSig);
-
-        // Prebuild hash buffers
-        char pmidstate[32];
-        char pdata[128];
-        char phash1[64];
-        FormatHashBuffers(pblock, pmidstate, pdata, phash1);
-
-        uint256 hashTarget = CBigNum().SetCompact(pblock->nBits).getuint256();
-
-        Object result;
-        result.push_back(Pair("midstate", HexStr(BEGIN(pmidstate), END(pmidstate)))); // deprecated
-        result.push_back(Pair("data",     HexStr(BEGIN(pdata), END(pdata))));
-        result.push_back(Pair("hash1",    HexStr(BEGIN(phash1), END(phash1)))); // deprecated
-        result.push_back(Pair("target",   HexStr(BEGIN(hashTarget), END(hashTarget))));
-        return result;
-    }
-    else
-    {
-        // Parse parameters
-        vector<unsigned char> vchData = ParseHex(params[0].get_str());
-        if (vchData.size() != 128)
-            throw JSONRPCError(-8, "Invalid parameter");
-        CBlock* pdata = (CBlock*)&vchData[0];
-
-        // Byte reverse
-        for (int i = 0; i < 128/4; i++)
-            ((unsigned int*)pdata)[i] = ByteReverse(((unsigned int*)pdata)[i]);
-
-        // Get saved block
-        if (!mapNewBlock.count(pdata->hashMerkleRoot))
-            return false;
-        CBlock* pblock = mapNewBlock[pdata->hashMerkleRoot].first;
-
-        pblock->nTime = pdata->nTime;
-        pblock->nNonce = pdata->nNonce;
-        pblock->vtx[0].vin[0].scriptSig = mapNewBlock[pdata->hashMerkleRoot].second;
-        pblock->hashMerkleRoot = pblock->BuildMerkleTree();
-
-        return CheckWork(pblock, *pwalletMain, reservekey);
-    }
-}
-
-Value getworkaux(const Array& params, bool fHelp)
-{
-    if (fHelp || params.size() < 1)
-        throw runtime_error(
-            "getworkaux <aux>\n"
-            "getworkaux '' <data>\n"
-            "getworkaux 'submit' <data>\n"
-            "getworkaux '' <data> <chain-index> <branch>*\n"
-            " get work with auxiliary data in coinbase, for multichain mining\n"
-            "<aux> is the merkle root of the auxiliary chain block hashes, concatenated with the aux chain merkle tree size and a nonce\n"
-            "<chain-index> is the aux chain index in the aux chain merkle tree\n"
-            "<branch> is the optional merkle branch of the aux chain\n"
-            "If <data> is not specified, returns formatted hash data to work on:\n"
-            "  \"midstate\" : precomputed hash state after hashing the first half of the data\n"
-            "  \"data\" : block data\n"
-            "  \"hash1\" : formatted hash buffer for second hash\n"
-            "  \"target\" : little endian hash target\n"
-            "If <data> is specified and 'submit', tries to solve the block for this (parent) chain and returns true if it was successful."
-            "If <data> is specified and empty first argument, returns the aux merkle root, with size and nonce."
-            "If <data> and <chain-index> are specified, creates an auxiliary proof of work for the chain specified and returns:\n"
-            "  \"aux\" : merkle root of auxiliary chain block hashes\n"
-            "  \"auxpow\" : aux proof of work to submit to aux chain\n"
-            );
-
-    if (vNodes.empty())
-        throw JSONRPCError(-9, "I0Coin is not connected!");
-
-    if (IsInitialBlockDownload())
-        throw JSONRPCError(-10, "I0Coin is downloading blocks...");
-
-    static map<uint256, pair<CBlock*, unsigned int> > mapNewBlock;
-    static vector<CBlock*> vNewBlock;
-    static CReserveKey reservekey(pwalletMain);
-
-    if (params.size() == 1)
-    {
-        static vector<unsigned char> vchAuxPrev;
-        vector<unsigned char> vchAux = ParseHex(params[0].get_str());
-
-        // Update block
-        static unsigned int nTransactionsUpdatedLast;
-        static CBlockIndex* pindexPrev;
-        static int64 nStart;
-        static CBlock* pblock;
-        if (pindexPrev != pindexBest ||
-            vchAux != vchAuxPrev ||
-            (nTransactionsUpdated != nTransactionsUpdatedLast && GetTime() - nStart > 60))
-        {
-            if (pindexPrev != pindexBest)
-            {
-                // Deallocate old blocks since they're obsolete now
-                mapNewBlock.clear();
-                BOOST_FOREACH(CBlock* pblock, vNewBlock)
-                    delete pblock;
-                vNewBlock.clear();
-            }
-            nTransactionsUpdatedLast = nTransactionsUpdated;
-            pindexPrev = pindexBest;
-            vchAuxPrev = vchAux;
-            nStart = GetTime();
-
-            // Create new block
-            pblock = CreateNewBlock(reservekey);
-            if (!pblock)
-                throw JSONRPCError(-7, "Out of memory");
-            vNewBlock.push_back(pblock);
-        }
-
-        // Update nTime
-        pblock->nTime = max(pindexPrev->GetMedianTimePast()+1, GetAdjustedTime());
-        pblock->nNonce = 0;
-
-        // Update nExtraNonce
-        static unsigned int nExtraNonce = 0;
-        static int64 nPrevTime = 0;
-        IncrementExtraNonceWithAux(pblock, pindexPrev, nExtraNonce, vchAux);
-
-        // Save
-        mapNewBlock[pblock->hashMerkleRoot] = make_pair(pblock, nExtraNonce);
-
-        // Prebuild hash buffers
-        char pmidstate[32];
-        char pdata[128];
-        char phash1[64];
-        FormatHashBuffers(pblock, pmidstate, pdata, phash1);
-
-        uint256 hashTarget = CBigNum().SetCompact(pblock->nBits).getuint256();
-
-        Object result;
-        result.push_back(Pair("midstate", HexStr(BEGIN(pmidstate), END(pmidstate))));
-        result.push_back(Pair("data",     HexStr(BEGIN(pdata), END(pdata))));
-        result.push_back(Pair("hash1",    HexStr(BEGIN(phash1), END(phash1))));
-        result.push_back(Pair("target",   HexStr(BEGIN(hashTarget), END(hashTarget))));
-        return result;
-    }
-    else
-    {
-        if (params[0].get_str() != "submit" && params[0].get_str() != "")
-            throw JSONRPCError(-8, "<aux> must be the empty string or 'submit' if work is being submitted");
-        // Parse parameters
-        vector<unsigned char> vchData = ParseHex(params[1].get_str());
-        if (vchData.size() != 128)
-            throw JSONRPCError(-8, "Invalid parameter");
-        CBlock* pdata = (CBlock*)&vchData[0];
-
-        // Byte reverse
-        for (int i = 0; i < 128/4; i++)
-            ((unsigned int*)pdata)[i] = ByteReverse(((unsigned int*)pdata)[i]);
-
-        // Get saved block
-        if (!mapNewBlock.count(pdata->hashMerkleRoot))
-            return false;
-        CBlock* pblock = mapNewBlock[pdata->hashMerkleRoot].first;
-        unsigned int nExtraNonce = mapNewBlock[pdata->hashMerkleRoot].second;
-
-        pblock->nTime = pdata->nTime;
-        pblock->nNonce = pdata->nNonce;
-
-        // Get the aux merkle root from the coinbase
-        CScript script = pblock->vtx[0].vin[0].scriptSig;
-        opcodetype opcode;
-        CScript::const_iterator pc = script.begin();
-        script.GetOp(pc, opcode);
-        script.GetOp(pc, opcode);
-        script.GetOp(pc, opcode);
-        if (opcode != OP_2)
-            throw runtime_error("invalid aux pow script");
-        vector<unsigned char> vchAux;
-        script.GetOp(pc, opcode, vchAux);
-
-        RemoveMergedMiningHeader(vchAux);
-
-        pblock->vtx[0].vin[0].scriptSig = MakeCoinbaseWithAux(pblock->nBits, nExtraNonce, vchAux);
-        pblock->hashMerkleRoot = pblock->BuildMerkleTree();
-
-        if (params.size() > 2)
-        {
-            // Requested aux proof of work
-            int nChainIndex = params[2].get_int();
-
-            CAuxPow pow(pblock->vtx[0]);
-
-            for (int i = 3 ; i < params.size() ; i++)
-            {
-                uint256 nHash;
-                nHash.SetHex(params[i].get_str());
-                pow.vChainMerkleBranch.push_back(nHash);
-            }
-
-            pow.SetMerkleBranch(pblock);
-            pow.nChainIndex = nChainIndex;
-            pow.parentBlock = *pblock;
-            CDataStream ss(SER_GETHASH|SER_BLOCKHEADERONLY);
-            ss << pow;
-            Object result;
-            result.push_back(Pair("auxpow", HexStr(ss.begin(), ss.end())));
-            return result;
-        }
-        else
-        {
-            if (params[0].get_str() == "submit")
-            {
-                return CheckWork(pblock, *pwalletMain, reservekey);
-            }
-            else
-            {
-                Object result;
-                result.push_back(Pair("aux", HexStr(vchAux.begin(), vchAux.end())));
-                result.push_back(Pair("hash", pblock->GetHash().GetHex()));
-                return result;
-            }
-        }
-    }
-}
-
-Value getauxblock(const Array& params, bool fHelp)
-{
-    if (fHelp || (params.size() != 0 && params.size() != 2))
-        throw runtime_error(
-            "getauxblock [<hash> <auxpow>]\n"
-            " create a new block"
-            "If <hash>, <auxpow> is not specified, returns a new block hash.\n"
-            "If <hash>, <auxpow> is specified, tries to solve the block based on "
-            "the aux proof of work and returns true if it was successful.");
-
-    if (vNodes.empty())
-        throw JSONRPCError(-9, "I0Coin is not connected!");
-
-    if (IsInitialBlockDownload())
-        throw JSONRPCError(-10, "I0Coin is downloading blocks...");
-
-    static map<uint256, CBlock*> mapNewBlock;
-    static vector<CBlock*> vNewBlock;
-    static CReserveKey reservekey(pwalletMain);
-
-    if (params.size() == 0)
-    {
-        // Update block
-        static unsigned int nTransactionsUpdatedLast;
-        static CBlockIndex* pindexPrev;
-        static int64 nStart;
-        static CBlock* pblock;
-        if (pindexPrev != pindexBest ||
-            (nTransactionsUpdated != nTransactionsUpdatedLast && GetTime() - nStart > 60))
-        {
-            if (pindexPrev != pindexBest)
-            {
-                // Deallocate old blocks since they're obsolete now
-                mapNewBlock.clear();
-                BOOST_FOREACH(CBlock* pblock, vNewBlock)
-                    delete pblock;
-                vNewBlock.clear();
-            }
-            nTransactionsUpdatedLast = nTransactionsUpdated;
-            pindexPrev = pindexBest;
-            nStart = GetTime();
-
-            // Create new block with nonce = 0 and extraNonce = 1
-            pblock = CreateNewBlock(reservekey);
-
-            // Update nTime
-            pblock->nTime = max(pindexPrev->GetMedianTimePast()+1, GetAdjustedTime());
-            pblock->nNonce = 0;
-
-            // Push OP_2 just in case we want versioning later
-            pblock->vtx[0].vin[0].scriptSig = CScript() << pblock->nBits << CBigNum(1) << OP_2;
-            pblock->hashMerkleRoot = pblock->BuildMerkleTree();
-
-            // Sets the version
-            pblock->SetAuxPow(new CAuxPow());
-
-            // Save
-            mapNewBlock[pblock->GetHash()] = pblock;
-
-            if (!pblock)
-                throw JSONRPCError(-7, "Out of memory");
-            vNewBlock.push_back(pblock);
-        }
-
-        uint256 hashTarget = CBigNum().SetCompact(pblock->nBits).getuint256();
-
-        Object result;
-        result.push_back(Pair("target",   HexStr(BEGIN(hashTarget), END(hashTarget))));
-        result.push_back(Pair("hash", pblock->GetHash().GetHex()));
-        result.push_back(Pair("chainid", pblock->GetChainID()));
-        return result;
-    }
-    else
-    {
-        uint256 hash;
-        hash.SetHex(params[0].get_str());
-        vector<unsigned char> vchAuxPow = ParseHex(params[1].get_str());
-        CDataStream ss(vchAuxPow, SER_GETHASH|SER_BLOCKHEADERONLY);
-        CAuxPow* pow = new CAuxPow();
-        ss >> *pow;
-        if (!mapNewBlock.count(hash))
-            return ::error("getauxblock() : block not found");
-
-        CBlock* pblock = mapNewBlock[hash];
-        pblock->SetAuxPow(pow);
-
-        if (!CheckWork(pblock, *pwalletMain, reservekey))
-        {
-            return false;
-        }
-        else
-        {
-            return true;
-        }
-    }
-}
-
-Value getmemorypool(const Array& params, bool fHelp)
-{
-    if (fHelp || params.size() > 1)
-        throw runtime_error(
-            "getmemorypool [data]\n"
-            "If [data] is not specified, returns data needed to construct a block to work on:\n"
-            "  \"version\" : block version\n"
-            "  \"previousblockhash\" : hash of current highest block\n"
-            "  \"transactions\" : contents of non-coinbase transactions that should be included in the next block\n"
-            "  \"coinbasevalue\" : maximum allowable input to coinbase transaction, including the generation award and transaction fees\n"
-            "  \"coinbaseflags\" : data that should be included in coinbase so support for new features can be judged\n"
-            "  \"time\" : timestamp appropriate for next block\n"
-            "  \"mintime\" : minimum timestamp appropriate for next block\n"
-            "  \"curtime\" : current timestamp\n"
-            "  \"bits\" : compressed target of next block\n"
-            "If [data] is specified, tries to solve the block and returns true if it was successful.");
-
-    if (params.size() == 0)
-    {
-        if (vNodes.empty())
-            throw JSONRPCError(-9, "Bitcoin is not connected!");
-
-        if (IsInitialBlockDownload())
-            throw JSONRPCError(-10, "Bitcoin is downloading blocks...");
-
-        static CReserveKey reservekey(pwalletMain);
-
-        // Update block
-        static unsigned int nTransactionsUpdatedLast;
-        static CBlockIndex* pindexPrev;
-        static int64 nStart;
-        static CBlock* pblock;
-        if (pindexPrev != pindexBest ||
-            (nTransactionsUpdated != nTransactionsUpdatedLast && GetTime() - nStart > 5))
-        {
-            nTransactionsUpdatedLast = nTransactionsUpdated;
-            pindexPrev = pindexBest;
-            nStart = GetTime();
-
-            // Create new block
-            if(pblock)
-                delete pblock;
-            pblock = CreateNewBlock(reservekey);
-            if (!pblock)
-                throw JSONRPCError(-7, "Out of memory");
-        }
-
-        // Update nTime
-        pblock->UpdateTime(pindexPrev);
-        pblock->nNonce = 0;
-
-        Array transactions;
-        BOOST_FOREACH(CTransaction tx, pblock->vtx) {
-            if(tx.IsCoinBase())
-                continue;
-
-            CDataStream ssTx;
-            ssTx << tx;
-
-            transactions.push_back(HexStr(ssTx.begin(), ssTx.end()));
-        }
-
-        Object result;
-        result.push_back(Pair("version", pblock->nVersion));
-        result.push_back(Pair("previousblockhash", pblock->hashPrevBlock.GetHex()));
-        result.push_back(Pair("transactions", transactions));
-        result.push_back(Pair("coinbasevalue", (int64_t)pblock->vtx[0].vout[0].nValue));
-        result.push_back(Pair("coinbaseflags", HexStr(COINBASE_FLAGS.begin(), COINBASE_FLAGS.end())));
-        result.push_back(Pair("time", (int64_t)pblock->nTime));
-        result.push_back(Pair("mintime", (int64_t)pindexPrev->GetMedianTimePast()+1));
-        result.push_back(Pair("curtime", (int64_t)GetAdjustedTime()));
-        result.push_back(Pair("bits", HexBits(pblock->nBits)));
-
-        return result;
-    }
-    else
-    {
-        // Parse parameters
-        CDataStream ssBlock(ParseHex(params[0].get_str()));
-        CBlock pblock;
-        ssBlock >> pblock;
-
-        return ProcessBlock(NULL, &pblock);
-    }
-}
-
-Value getblockhash(const Array& params, bool fHelp)
-{
-    if (fHelp || params.size() != 1)
-        throw runtime_error(
-            "getblockhash <index>\n"
-            "Returns hash of block in best-block-chain at <index>.");
-
-    int nHeight = params[0].get_int();
-    if (nHeight < 0 || nHeight > nBestHeight)
-        throw runtime_error("Block number out of range.");
-
-    CBlock block;
-    CBlockIndex* pblockindex = mapBlockIndex[hashBestChain];
-    while (pblockindex->nHeight > nHeight)
-        pblockindex = pblockindex->pprev;
-    return pblockindex->phashBlock->GetHex();
-}
-
-Value getblock(const Array& params, bool fHelp)
-{
-    if (fHelp || params.size() != 1)
-        throw runtime_error(
-            "getblock <hash>\n"
-            "Returns details of a block with given block-hash.");
-
-    std::string strHash = params[0].get_str();
-    uint256 hash(strHash);
-
-    if (mapBlockIndex.count(hash) == 0)
-        throw JSONRPCError(-5, "Block not found");
-
-    CBlock block;
-    CBlockIndex* pblockindex = mapBlockIndex[hash];
-    block.ReadFromDisk(pblockindex, true);
-
-    return blockToJSON(block, pblockindex);
-}
-
-
-Value buildmerkletree(const Array& params, bool fHelp)
-{
-    if (fHelp || params.size() < 1)
-        throw runtime_error(
-                "buildmerkletree <obj>...\n"
-                " build a merkle tree with the given hex-encoded objects\n"
-                );
-    vector<uint256> vTree;
-    BOOST_FOREACH(const Value& obj, params)
-    {
-        uint256 nHash;
-        nHash.SetHex(obj.get_str());
-        vTree.push_back(nHash);
-    }
-
-    int j = 0;
-    for (int nSize = params.size(); nSize > 1; nSize = (nSize + 1) / 2)
-    {
-        for (int i = 0; i < nSize; i += 2)
-        {
-            int i2 = std::min(i+1, nSize-1);
-            vTree.push_back(Hash(BEGIN(vTree[j+i]),  END(vTree[j+i]),
-                        BEGIN(vTree[j+i2]), END(vTree[j+i2])));
-        }
-        j += nSize;
-    }
-
-    Array result;
-    BOOST_FOREACH(uint256& nNode, vTree)
-    {
-        result.push_back(nNode.GetHex());
-    }
-
-    return result;
-}
- 
-
-
-
-
-
 
 
 
@@ -2447,93 +189,86 @@ Value buildmerkletree(const Array& params, bool fHelp)
 // Call Table
 //
 
-pair<string, rpcfn_type> pCallTable[] =
-{
-    make_pair("help",                   &help),
-    make_pair("stop",                   &stop),
-    make_pair("getblockbycount",        &getblockbycount),
-    make_pair("getblockbyhash",         &getblockbyhash),
-    make_pair("getblockcount",          &getblockcount),
-    make_pair("getblocknumber",         &getblocknumber),
-    make_pair("getconnectioncount",     &getconnectioncount),
-    make_pair("getdifficulty",          &getdifficulty),
-    make_pair("getgenerate",            &getgenerate),
-    make_pair("setgenerate",            &setgenerate),
-    make_pair("gethashespersec",        &gethashespersec),
-    make_pair("getinfo",                &getinfo),
-    make_pair("getmininginfo",          &getmininginfo),
-    make_pair("getnewaddress",          &getnewaddress),
-    make_pair("getaccountaddress",      &getaccountaddress),
-    make_pair("setaccount",             &setaccount),
-    make_pair("getaccount",             &getaccount),
-    make_pair("getaddressesbyaccount",  &getaddressesbyaccount),
-    make_pair("sendtoaddress",          &sendtoaddress),
-    make_pair("getreceivedbyaddress",   &getreceivedbyaddress),
-    make_pair("getreceivedbyaccount",   &getreceivedbyaccount),
-    make_pair("listreceivedbyaddress",  &listreceivedbyaddress),
-    make_pair("listreceivedbyaccount",  &listreceivedbyaccount),
-    make_pair("backupwallet",           &backupwallet),
-    make_pair("keypoolrefill",          &keypoolrefill),
-    make_pair("walletpassphrase",       &walletpassphrase),
-    make_pair("walletpassphrasechange", &walletpassphrasechange),
-    make_pair("walletlock",             &walletlock),
-    make_pair("encryptwallet",          &encryptwallet),
-    make_pair("validateaddress",        &validateaddress),
-    make_pair("getbalance",             &getbalance),
-    make_pair("move",                   &movecmd),
-    make_pair("sendfrom",               &sendfrom),
-    make_pair("sendmany",               &sendmany),
-    make_pair("addmultisigaddress",     &addmultisigaddress),
-    make_pair("getblock",               &getblock),
-    make_pair("getblockhash",           &getblockhash),
-    make_pair("gettransaction",         &gettransaction),
-    make_pair("listtransactions",       &listtransactions),
-    make_pair("signmessage",            &signmessage),
-    make_pair("verifymessage",          &verifymessage),
-    make_pair("getwork",                &getwork),
-    make_pair("getworkaux",             &getworkaux),
-    make_pair("getauxblock",            &getauxblock),
-    make_pair("buildmerkletree",        &buildmerkletree),
-    make_pair("listaccounts",           &listaccounts),
-    make_pair("settxfee",               &settxfee),
-    make_pair("getmemorypool",          &getmemorypool),
-    make_pair("listsinceblock",         &listsinceblock),
-    make_pair("dumpprivkey",            &dumpprivkey),
-    make_pair("importprivkey",          &importprivkey)
+
+static const CRPCCommand vRPCCommands[] =
+{ //  name                      function                 safemd  unlocked
+  //  ------------------------  -----------------------  ------  --------
+    { "help",                   &help,                   true,   true },
+    { "stop",                   &stop,                   true,   true },
+    { "getblockcount",          &getblockcount,          true,   false },
+    { "getconnectioncount",     &getconnectioncount,     true,   false },
+    { "getpeerinfo",            &getpeerinfo,            true,   false },
+    { "getdifficulty",          &getdifficulty,          true,   false },
+    { "getgenerate",            &getgenerate,            true,   false },
+    { "setgenerate",            &setgenerate,            true,   false },
+    { "gethashespersec",        &gethashespersec,        true,   false },
+    { "getinfo",                &getinfo,                true,   false },
+    { "getmininginfo",          &getmininginfo,          true,   false },
+    { "getnewaddress",          &getnewaddress,          true,   false },
+    { "getaccountaddress",      &getaccountaddress,      true,   false },
+    { "setaccount",             &setaccount,             true,   false },
+    { "getaccount",             &getaccount,             false,  false },
+    { "getaddressesbyaccount",  &getaddressesbyaccount,  true,   false },
+    { "sendtoaddress",          &sendtoaddress,          false,  false },
+    { "getreceivedbyaddress",   &getreceivedbyaddress,   false,  false },
+    { "getreceivedbyaccount",   &getreceivedbyaccount,   false,  false },
+    { "listreceivedbyaddress",  &listreceivedbyaddress,  false,  false },
+    { "listreceivedbyaccount",  &listreceivedbyaccount,  false,  false },
+    { "backupwallet",           &backupwallet,           true,   false },
+    { "keypoolrefill",          &keypoolrefill,          true,   false },
+    { "walletpassphrase",       &walletpassphrase,       true,   false },
+    { "walletpassphrasechange", &walletpassphrasechange, false,  false },
+    { "walletlock",             &walletlock,             true,   false },
+    { "encryptwallet",          &encryptwallet,          false,  false },
+    { "validateaddress",        &validateaddress,        true,   false },
+    { "getbalance",             &getbalance,             false,  false },
+    { "move",                   &movecmd,                false,  false },
+    { "sendfrom",               &sendfrom,               false,  false },
+    { "sendmany",               &sendmany,               false,  false },
+    { "addmultisigaddress",     &addmultisigaddress,     false,  false },
+    { "getrawmempool",          &getrawmempool,          true,   false },
+    { "getblock",               &getblock,               false,  false },
+    { "getblockhash",           &getblockhash,           false,  false },
+    { "gettransaction",         &gettransaction,         false,  false },
+    { "listtransactions",       &listtransactions,       false,  false },
+    { "listaddressgroupings",   &listaddressgroupings,   false,  false },
+    { "signmessage",            &signmessage,            false,  false },
+    { "verifymessage",          &verifymessage,          false,  false },
+    { "getwork",                &getwork,                true,   false },
+    { "listaccounts",           &listaccounts,           false,  false },
+    { "settxfee",               &settxfee,               false,  false },
+    { "getblocktemplate",       &getblocktemplate,       true,   false },
+    { "submitblock",            &submitblock,            false,  false },
+    { "listsinceblock",         &listsinceblock,         false,  false },
+    { "dumpprivkey",            &dumpprivkey,            false,  false },
+    { "importprivkey",          &importprivkey,          false,  false },
+    { "listunspent",            &listunspent,            false,  false },
+    { "getrawtransaction",      &getrawtransaction,      false,  false },
+    { "createrawtransaction",   &createrawtransaction,   false,  false },
+    { "decoderawtransaction",   &decoderawtransaction,   false,  false },
+    { "signrawtransaction",     &signrawtransaction,     false,  false },
+    { "sendrawtransaction",     &sendrawtransaction,     false,  false },
 };
-map<string, rpcfn_type> mapCallTable(pCallTable, pCallTable + sizeof(pCallTable)/sizeof(pCallTable[0]));
 
-string pAllowInSafeMode[] =
+CRPCTable::CRPCTable()
 {
-    "help",
-    "stop",
-    "getblockcount",
-    "getblocknumber",  // deprecated
-    "getconnectioncount",
-    "getdifficulty",
-    "getgenerate",
-    "setgenerate",
-    "gethashespersec",
-    "getinfo",
-    "getmininginfo",
-    "getnewaddress",
-    "getaccountaddress",
-    "getaccount",
-    "getaddressesbyaccount",
-    "backupwallet",
-    "keypoolrefill",
-    "walletpassphrase",
-    "walletlock",
-    "validateaddress",
-    "getwork",
-    "getworkaux",
-    "getauxblock",
-    "getmemorypool",
-};
-set<string> setAllowInSafeMode(pAllowInSafeMode, pAllowInSafeMode + sizeof(pAllowInSafeMode)/sizeof(pAllowInSafeMode[0]));
+    unsigned int vcidx;
+    for (vcidx = 0; vcidx < (sizeof(vRPCCommands) / sizeof(vRPCCommands[0])); vcidx++)
+    {
+        const CRPCCommand *pcmd;
 
+        pcmd = &vRPCCommands[vcidx];
+        mapCommands[pcmd->name] = pcmd;
+    }
+}
 
-
+const CRPCCommand *CRPCTable::operator[](string name) const
+{
+    map<string, const CRPCCommand*>::const_iterator it = mapCommands.find(name);
+    if (it == mapCommands.end())
+        return NULL;
+    return (*it).second;
+}
 
 //
 // HTTP protocol
@@ -2566,13 +301,13 @@ string rfc1123Time()
     time(&now);
     struct tm* now_gmt = gmtime(&now);
     string locale(setlocale(LC_TIME, NULL));
-    setlocale(LC_TIME, "C"); // we want posix (aka "C") weekday/month strings
+    setlocale(LC_TIME, "C"); // we want POSIX (aka "C") weekday/month strings
     strftime(buffer, sizeof(buffer), "%a, %d %b %Y %H:%M:%S +0000", now_gmt);
     setlocale(LC_TIME, locale.c_str());
     return string(buffer);
 }
 
-static string HTTPReply(int nStatus, const string& strMsg)
+static string HTTPReply(int nStatus, const string& strMsg, bool keepalive)
 {
     if (nStatus == 401)
         return strprintf("HTTP/1.0 401 Authorization Required\r\n"
@@ -2601,7 +336,7 @@ static string HTTPReply(int nStatus, const string& strMsg)
     return strprintf(
             "HTTP/1.1 %d %s\r\n"
             "Date: %s\r\n"
-            "Connection: close\r\n"
+            "Connection: %s\r\n"
             "Content-Length: %d\r\n"
             "Content-Type: application/json\r\n"
             "Server: i0coin-json-rpc/%s\r\n"
@@ -2610,12 +345,13 @@ static string HTTPReply(int nStatus, const string& strMsg)
         nStatus,
         cStatus,
         rfc1123Time().c_str(),
+        keepalive ? "keep-alive" : "close",
         strMsg.size(),
         FormatFullVersion().c_str(),
         strMsg.c_str());
 }
 
-int ReadHTTPStatus(std::basic_istream<char>& stream)
+int ReadHTTPStatus(std::basic_istream<char>& stream, int &proto)
 {
     string str;
     getline(stream, str);
@@ -2623,6 +359,10 @@ int ReadHTTPStatus(std::basic_istream<char>& stream)
     boost::split(vWords, str, boost::is_any_of(" "));
     if (vWords.size() < 2)
         return 500;
+    proto = 0;
+    const char *ver = strstr(str.c_str(), "HTTP/1.");
+    if (ver != NULL)
+        proto = atoi(ver+7);
     return atoi(vWords[1].c_str());
 }
 
@@ -2657,11 +397,12 @@ int ReadHTTP(std::basic_istream<char>& stream, map<string, string>& mapHeadersRe
     strMessageRet = "";
 
     // Read status
-    int nStatus = ReadHTTPStatus(stream);
+    int nProto = 0;
+    int nStatus = ReadHTTPStatus(stream, nProto);
 
     // Read header
     int nLen = ReadHTTPHeader(stream, mapHeadersRet);
-    if (nLen < 0 || nLen > MAX_SIZE)
+    if (nLen < 0 || nLen > (int)MAX_SIZE)
         return 500;
 
     // Read message
@@ -2670,6 +411,16 @@ int ReadHTTP(std::basic_istream<char>& stream, map<string, string>& mapHeadersRe
         vector<char> vch(nLen);
         stream.read(&vch[0], nLen);
         strMessageRet = string(vch.begin(), vch.end());
+    }
+
+    string sConHdr = mapHeadersRet["connection"];
+
+    if ((sConHdr != "close") && (sConHdr != "keep-alive"))
+    {
+        if (nProto >= 1)
+            mapHeadersRet["connection"] = "keep-alive";
+        else
+            mapHeadersRet["connection"] = "close";
     }
 
     return nStatus;
@@ -2704,7 +455,7 @@ string JSONRPCRequest(const string& strMethod, const Array& params, const Value&
     return write_string(Value(request), false) + "\n";
 }
 
-string JSONRPCReply(const Value& result, const Value& error, const Value& id)
+Object JSONRPCReplyObj(const Value& result, const Value& error, const Value& id)
 {
     Object reply;
     if (error.type() != null_type)
@@ -2713,6 +464,12 @@ string JSONRPCReply(const Value& result, const Value& error, const Value& id)
         reply.push_back(Pair("result", result));
     reply.push_back(Pair("error", error));
     reply.push_back(Pair("id", id));
+    return reply;
+}
+
+string JSONRPCReply(const Value& result, const Value& error, const Value& id)
+{
+    Object reply = JSONRPCReplyObj(result, error, id);
     return write_string(Value(reply), false) + "\n";
 }
 
@@ -2724,13 +481,25 @@ void ErrorReply(std::ostream& stream, const Object& objError, const Value& id)
     if (code == -32600) nStatus = 400;
     else if (code == -32601) nStatus = 404;
     string strReply = JSONRPCReply(Value::null, objError, id);
-    stream << HTTPReply(nStatus, strReply) << std::flush;
+    stream << HTTPReply(nStatus, strReply, false) << std::flush;
 }
 
-bool ClientAllowed(const string& strAddress)
+bool ClientAllowed(const boost::asio::ip::address& address)
 {
-    if (strAddress == asio::ip::address_v4::loopback().to_string())
+    // Make sure that IPv4-compatible and IPv4-mapped IPv6 addresses are treated as IPv4 addresses
+    if (address.is_v6()
+     && (address.to_v6().is_v4_compatible()
+      || address.to_v6().is_v4_mapped()))
+        return ClientAllowed(address.to_v6().to_v4());
+
+    if (address == asio::ip::address_v4::loopback()
+     || address == asio::ip::address_v6::loopback()
+     || (address.is_v4()
+         // Check whether IPv4 addresses match 127.0.0.0/8 (loopback subnet)
+      && (address.to_v4().to_ulong() & 0xff000000) == 0x7f000000))
         return true;
+
+    const string strAddress = address.to_string();
     const vector<string>& vAllow = mapMultiArgs["-rpcallowip"];
     BOOST_FOREACH(string strAllow, vAllow)
         if (WildcardMatch(strAddress, strAllow))
@@ -2738,13 +507,13 @@ bool ClientAllowed(const string& strAddress)
     return false;
 }
 
-#ifdef USE_SSL
 //
 // IOStream device that speaks SSL but can also speak non-SSL
 //
+template <typename Protocol>
 class SSLIOStreamDevice : public iostreams::device<iostreams::bidirectional> {
 public:
-    SSLIOStreamDevice(SSLStream &streamIn, bool fUseSSLIn) : stream(streamIn)
+    SSLIOStreamDevice(asio::ssl::stream<typename Protocol::socket> &streamIn, bool fUseSSLIn) : stream(streamIn)
     {
         fUseSSL = fUseSSLIn;
         fNeedHandshake = fUseSSLIn;
@@ -2788,27 +557,153 @@ public:
 private:
     bool fNeedHandshake;
     bool fUseSSL;
-    SSLStream& stream;
+    asio::ssl::stream<typename Protocol::socket>& stream;
 };
-#endif
+
+class AcceptedConnection
+{
+public:
+    virtual ~AcceptedConnection() {}
+
+    virtual std::iostream& stream() = 0;
+    virtual std::string peer_address_to_string() const = 0;
+    virtual void close() = 0;
+};
+
+template <typename Protocol>
+class AcceptedConnectionImpl : public AcceptedConnection
+{
+public:
+    AcceptedConnectionImpl(
+            asio::io_service& io_service,
+            ssl::context &context,
+            bool fUseSSL) :
+        sslStream(io_service, context),
+        _d(sslStream, fUseSSL),
+        _stream(_d)
+    {
+    }
+
+    virtual std::iostream& stream()
+    {
+        return _stream;
+    }
+
+    virtual std::string peer_address_to_string() const
+    {
+        return peer.address().to_string();
+    }
+
+    virtual void close()
+    {
+        _stream.close();
+    }
+
+    typename Protocol::endpoint peer;
+    asio::ssl::stream<typename Protocol::socket> sslStream;
+
+private:
+    SSLIOStreamDevice<Protocol> _d;
+    iostreams::stream< SSLIOStreamDevice<Protocol> > _stream;
+};
 
 void ThreadRPCServer(void* parg)
 {
     IMPLEMENT_RANDOMIZE_STACK(ThreadRPCServer(parg));
+
+    // Make this thread recognisable as the RPC listener
+    RenameThread("bitcoin-rpclist");
+
     try
     {
-        vnThreadsRunning[THREAD_RPCSERVER]++;
+        vnThreadsRunning[THREAD_RPCLISTENER]++;
         ThreadRPCServer2(parg);
-        vnThreadsRunning[THREAD_RPCSERVER]--;
+        vnThreadsRunning[THREAD_RPCLISTENER]--;
     }
     catch (std::exception& e) {
-        vnThreadsRunning[THREAD_RPCSERVER]--;
+        vnThreadsRunning[THREAD_RPCLISTENER]--;
         PrintException(&e, "ThreadRPCServer()");
     } catch (...) {
-        vnThreadsRunning[THREAD_RPCSERVER]--;
+        vnThreadsRunning[THREAD_RPCLISTENER]--;
         PrintException(NULL, "ThreadRPCServer()");
     }
-    printf("ThreadRPCServer exiting\n");
+    printf("ThreadRPCServer exited\n");
+}
+
+// Forward declaration required for RPCListen
+template <typename Protocol, typename SocketAcceptorService>
+static void RPCAcceptHandler(boost::shared_ptr< basic_socket_acceptor<Protocol, SocketAcceptorService> > acceptor,
+                             ssl::context& context,
+                             bool fUseSSL,
+                             AcceptedConnection* conn,
+                             const boost::system::error_code& error);
+
+/**
+ * Sets up I/O resources to accept and handle a new connection.
+ */
+template <typename Protocol, typename SocketAcceptorService>
+static void RPCListen(boost::shared_ptr< basic_socket_acceptor<Protocol, SocketAcceptorService> > acceptor,
+                   ssl::context& context,
+                   const bool fUseSSL)
+{
+    // Accept connection
+    AcceptedConnectionImpl<Protocol>* conn = new AcceptedConnectionImpl<Protocol>(acceptor->get_io_service(), context, fUseSSL);
+
+    acceptor->async_accept(
+            conn->sslStream.lowest_layer(),
+            conn->peer,
+            boost::bind(&RPCAcceptHandler<Protocol, SocketAcceptorService>,
+                acceptor,
+                boost::ref(context),
+                fUseSSL,
+                conn,
+                boost::asio::placeholders::error));
+}
+
+/**
+ * Accept and handle incoming connection.
+ */
+template <typename Protocol, typename SocketAcceptorService>
+static void RPCAcceptHandler(boost::shared_ptr< basic_socket_acceptor<Protocol, SocketAcceptorService> > acceptor,
+                             ssl::context& context,
+                             const bool fUseSSL,
+                             AcceptedConnection* conn,
+                             const boost::system::error_code& error)
+{
+    vnThreadsRunning[THREAD_RPCLISTENER]++;
+
+    // Immediately start accepting new connections, except when we're cancelled or our socket is closed.
+    if (error != asio::error::operation_aborted
+     && acceptor->is_open())
+        RPCListen(acceptor, context, fUseSSL);
+
+    AcceptedConnectionImpl<ip::tcp>* tcp_conn = dynamic_cast< AcceptedConnectionImpl<ip::tcp>* >(conn);
+
+    // TODO: Actually handle errors
+    if (error)
+    {
+        delete conn;
+    }
+
+    // Restrict callers by IP.  It is important to
+    // do this before starting client thread, to filter out
+    // certain DoS and misbehaving clients.
+    else if (tcp_conn
+          && !ClientAllowed(tcp_conn->peer.address()))
+    {
+        // Only send a 403 if we're not using SSL to prevent a DoS during the SSL handshake.
+        if (!fUseSSL)
+            conn->stream() << HTTPReply(403, "", false) << std::flush;
+        delete conn;
+    }
+
+    // start HTTP client thread
+    else if (!CreateThread(ThreadRPCServer3, conn)) {
+        printf("Failed to create RPC server client thread\n");
+        delete conn;
+    }
+
+    vnThreadsRunning[THREAD_RPCLISTENER]--;
 }
 
 void ThreadRPCServer2(void* parg)
@@ -2825,7 +720,7 @@ void ThreadRPCServer2(void* parg)
             strWhatAmI = strprintf(_("To use the %s option"), "\"-server\"");
         else if (mapArgs.count("-daemon"))
             strWhatAmI = strprintf(_("To use the %s option"), "\"-daemon\"");
-        ::error(
+        uiInterface.ThreadSafeMessageBox(strprintf(
             _("%s, you must set a rpcpassword in the configuration file:\n %s\n"
               "It is recommended you use the following random password:\n"
               "rpcuser=bitcoinrpc\n"
@@ -2833,178 +728,301 @@ void ThreadRPCServer2(void* parg)
               "(you do not need to remember this password)\n"
               "If the file does not exist, create it with owner-readable-only file permissions.\n"),
                 strWhatAmI.c_str(),
-                GetConfigFile().c_str(),
-                EncodeBase58(&rand_pwd[0],&rand_pwd[0]+32).c_str());
-#ifndef QT_GUI
-        CreateThread(Shutdown, NULL);
-#endif
+                GetConfigFile().string().c_str(),
+                EncodeBase58(&rand_pwd[0],&rand_pwd[0]+32).c_str()),
+            _("Error"), CClientUIInterface::OK | CClientUIInterface::MODAL);
+        StartShutdown();
         return;
     }
 
-    bool fUseSSL = GetBoolArg("-rpcssl");
-    asio::ip::address bindAddress = mapArgs.count("-rpcallowip") ? asio::ip::address_v4::any() : asio::ip::address_v4::loopback();
+    const bool fUseSSL = GetBoolArg("-rpcssl");
 
     asio::io_service io_service;
-    ip::tcp::endpoint endpoint(bindAddress, GetArg("-rpcport", 7332));
-    ip::tcp::acceptor acceptor(io_service, endpoint);
 
-    acceptor.set_option(boost::asio::ip::tcp::acceptor::reuse_address(true));
-
-#ifdef USE_SSL
     ssl::context context(io_service, ssl::context::sslv23);
     if (fUseSSL)
     {
         context.set_options(ssl::context::no_sslv2);
-        filesystem::path certfile = GetArg("-rpcsslcertificatechainfile", "server.cert");
-        if (!certfile.is_complete()) certfile = filesystem::path(GetDataDir()) / certfile;
-        if (filesystem::exists(certfile)) context.use_certificate_chain_file(certfile.string().c_str());
-        else printf("ThreadRPCServer ERROR: missing server certificate file %s\n", certfile.string().c_str());
-        filesystem::path pkfile = GetArg("-rpcsslprivatekeyfile", "server.pem");
-        if (!pkfile.is_complete()) pkfile = filesystem::path(GetDataDir()) / pkfile;
-        if (filesystem::exists(pkfile)) context.use_private_key_file(pkfile.string().c_str(), ssl::context::pem);
-        else printf("ThreadRPCServer ERROR: missing server private key file %s\n", pkfile.string().c_str());
 
-        string ciphers = GetArg("-rpcsslciphers",
-                                         "TLSv1+HIGH:!SSLv2:!aNULL:!eNULL:!AH:!3DES:@STRENGTH");
-        SSL_CTX_set_cipher_list(context.impl(), ciphers.c_str());
+        filesystem::path pathCertFile(GetArg("-rpcsslcertificatechainfile", "server.cert"));
+        if (!pathCertFile.is_complete()) pathCertFile = filesystem::path(GetDataDir()) / pathCertFile;
+        if (filesystem::exists(pathCertFile)) context.use_certificate_chain_file(pathCertFile.string());
+        else printf("ThreadRPCServer ERROR: missing server certificate file %s\n", pathCertFile.string().c_str());
+
+        filesystem::path pathPKFile(GetArg("-rpcsslprivatekeyfile", "server.pem"));
+        if (!pathPKFile.is_complete()) pathPKFile = filesystem::path(GetDataDir()) / pathPKFile;
+        if (filesystem::exists(pathPKFile)) context.use_private_key_file(pathPKFile.string(), ssl::context::pem);
+        else printf("ThreadRPCServer ERROR: missing server private key file %s\n", pathPKFile.string().c_str());
+
+        string strCiphers = GetArg("-rpcsslciphers", "TLSv1+HIGH:!SSLv2:!aNULL:!eNULL:!AH:!3DES:@STRENGTH");
+        SSL_CTX_set_cipher_list(context.impl(), strCiphers.c_str());
     }
-#else
-    if (fUseSSL)
-        throw runtime_error("-rpcssl=1, but i0coin compiled without full openssl libraries.");
-#endif
 
-    loop
+    // Try a dual IPv6/IPv4 socket, falling back to separate IPv4 and IPv6 sockets
+    const bool loopback = !mapArgs.count("-rpcallowip");
+    asio::ip::address bindAddress = loopback ? asio::ip::address_v6::loopback() : asio::ip::address_v6::any();
+    ip::tcp::endpoint endpoint(bindAddress, GetArg("-rpcport", 8332));
+
+    boost::signals2::signal<void ()> StopRequests;
+
+    try
     {
-        // Accept connection
-#ifdef USE_SSL
-        SSLStream sslStream(io_service, context);
-        SSLIOStreamDevice d(sslStream, fUseSSL);
-        iostreams::stream<SSLIOStreamDevice> stream(d);
-#else
-        ip::tcp::iostream stream;
-#endif
+        boost::shared_ptr<ip::tcp::acceptor> acceptor(new ip::tcp::acceptor(io_service));
+        acceptor->open(endpoint.protocol());
+        acceptor->set_option(boost::asio::ip::tcp::acceptor::reuse_address(true));
 
-        ip::tcp::endpoint peer;
-        vnThreadsRunning[THREAD_RPCSERVER]--;
-#ifdef USE_SSL
-        acceptor.accept(sslStream.lowest_layer(), peer);
-#else
-        acceptor.accept(*stream.rdbuf(), peer);
-#endif
-        vnThreadsRunning[4]++;
-        if (fShutdown)
-            return;
+        // Try making the socket dual IPv6/IPv4 (if listening on the "any" address)
+        boost::system::error_code v6_only_error;
+        acceptor->set_option(boost::asio::ip::v6_only(loopback), v6_only_error);
 
-        // Restrict callers by IP
-        if (!ClientAllowed(peer.address().to_string()))
+        acceptor->bind(endpoint);
+        acceptor->listen(socket_base::max_connections);
+
+        RPCListen(acceptor, context, fUseSSL);
+        // Cancel outstanding listen-requests for this acceptor when shutting down
+        StopRequests.connect(signals2::slot<void ()>(
+                    static_cast<void (ip::tcp::acceptor::*)()>(&ip::tcp::acceptor::close), acceptor.get())
+                .track(acceptor));
+
+        // If dual IPv6/IPv4 failed (or we're opening loopback interfaces only), open IPv4 separately
+        if (loopback || v6_only_error)
         {
-            // Only send a 403 if we're not using SSL to prevent a DoS during the SSL handshake.
-            if (!fUseSSL)
-                stream << HTTPReply(403, "") << std::flush;
-            continue;
-        }
+            bindAddress = loopback ? asio::ip::address_v4::loopback() : asio::ip::address_v4::any();
+            endpoint.address(bindAddress);
 
+            acceptor.reset(new ip::tcp::acceptor(io_service));
+            acceptor->open(endpoint.protocol());
+            acceptor->set_option(boost::asio::ip::tcp::acceptor::reuse_address(true));
+            acceptor->bind(endpoint);
+            acceptor->listen(socket_base::max_connections);
+
+            RPCListen(acceptor, context, fUseSSL);
+            // Cancel outstanding listen-requests for this acceptor when shutting down
+            StopRequests.connect(signals2::slot<void ()>(
+                        static_cast<void (ip::tcp::acceptor::*)()>(&ip::tcp::acceptor::close), acceptor.get())
+                    .track(acceptor));
+        }
+    }
+    catch(boost::system::system_error &e)
+    {
+        uiInterface.ThreadSafeMessageBox(strprintf(_("An error occurred while setting up the RPC port %i for listening: %s"), endpoint.port(), e.what()),
+                             _("Error"), CClientUIInterface::OK | CClientUIInterface::MODAL);
+        StartShutdown();
+        return;
+    }
+
+    vnThreadsRunning[THREAD_RPCLISTENER]--;
+    while (!fShutdown)
+        io_service.run_one();
+    vnThreadsRunning[THREAD_RPCLISTENER]++;
+    StopRequests();
+}
+
+class JSONRequest
+{
+public:
+    Value id;
+    string strMethod;
+    Array params;
+
+    JSONRequest() { id = Value::null; }
+    void parse(const Value& valRequest);
+};
+
+void JSONRequest::parse(const Value& valRequest)
+{
+    // Parse request
+    if (valRequest.type() != obj_type)
+        throw JSONRPCError(-32600, "Invalid Request object");
+    const Object& request = valRequest.get_obj();
+
+    // Parse id now so errors from here on will have the id
+    id = find_value(request, "id");
+
+    // Parse method
+    Value valMethod = find_value(request, "method");
+    if (valMethod.type() == null_type)
+        throw JSONRPCError(-32600, "Missing method");
+    if (valMethod.type() != str_type)
+        throw JSONRPCError(-32600, "Method must be a string");
+    strMethod = valMethod.get_str();
+    if (strMethod != "getwork" && strMethod != "getblocktemplate")
+        printf("ThreadRPCServer method=%s\n", strMethod.c_str());
+
+    // Parse params
+    Value valParams = find_value(request, "params");
+    if (valParams.type() == array_type)
+        params = valParams.get_array();
+    else if (valParams.type() == null_type)
+        params = Array();
+    else
+        throw JSONRPCError(-32600, "Params must be an array");
+}
+
+static Object JSONRPCExecOne(const Value& req)
+{
+    Object rpc_result;
+
+    JSONRequest jreq;
+    try {
+        jreq.parse(req);
+
+        Value result = tableRPC.execute(jreq.strMethod, jreq.params);
+        rpc_result = JSONRPCReplyObj(result, Value::null, jreq.id);
+    }
+    catch (Object& objError)
+    {
+        rpc_result = JSONRPCReplyObj(Value::null, objError, jreq.id);
+    }
+    catch (std::exception& e)
+    {
+        rpc_result = JSONRPCReplyObj(Value::null,
+                                     JSONRPCError(-32700, e.what()), jreq.id);
+    }
+
+    return rpc_result;
+}
+
+static string JSONRPCExecBatch(const Array& vReq)
+{
+    Array ret;
+    for (unsigned int reqIdx = 0; reqIdx < vReq.size(); reqIdx++)
+        ret.push_back(JSONRPCExecOne(vReq[reqIdx]));
+
+    return write_string(Value(ret), false) + "\n";
+}
+
+static CCriticalSection cs_THREAD_RPCHANDLER;
+
+void ThreadRPCServer3(void* parg)
+{
+    IMPLEMENT_RANDOMIZE_STACK(ThreadRPCServer3(parg));
+
+    // Make this thread recognisable as the RPC handler
+    RenameThread("bitcoin-rpchand");
+
+    {
+        LOCK(cs_THREAD_RPCHANDLER);
+        vnThreadsRunning[THREAD_RPCHANDLER]++;
+    }
+    AcceptedConnection *conn = (AcceptedConnection *) parg;
+
+    bool fRun = true;
+    loop {
+        if (fShutdown || !fRun)
+        {
+            conn->close();
+            delete conn;
+            {
+                LOCK(cs_THREAD_RPCHANDLER);
+                --vnThreadsRunning[THREAD_RPCHANDLER];
+            }
+            return;
+        }
         map<string, string> mapHeaders;
         string strRequest;
 
-        boost::thread api_caller(ReadHTTP, boost::ref(stream), boost::ref(mapHeaders), boost::ref(strRequest));
-        if (!api_caller.timed_join(boost::posix_time::seconds(GetArg("-rpctimeout", 30))))
-        {   // Timed out:
-            acceptor.cancel();
-            printf("ThreadRPCServer ReadHTTP timeout\n");
-            continue;
-        }
+        ReadHTTP(conn->stream(), mapHeaders, strRequest);
 
         // Check authorization
         if (mapHeaders.count("authorization") == 0)
         {
-            stream << HTTPReply(401, "") << std::flush;
-            continue;
+            conn->stream() << HTTPReply(401, "", false) << std::flush;
+            break;
         }
         if (!HTTPAuthorized(mapHeaders))
         {
-            printf("ThreadRPCServer incorrect password attempt from %s\n",peer.address().to_string().c_str());
+            printf("ThreadRPCServer incorrect password attempt from %s\n", conn->peer_address_to_string().c_str());
             /* Deter brute-forcing short passwords.
                If this results in a DOS the user really
                shouldn't have their RPC port exposed.*/
             if (mapArgs["-rpcpassword"].size() < 20)
                 Sleep(250);
 
-            stream << HTTPReply(401, "") << std::flush;
-            continue;
+            conn->stream() << HTTPReply(401, "", false) << std::flush;
+            break;
         }
+        if (mapHeaders["connection"] == "close")
+            fRun = false;
 
-        Value id = Value::null;
+        JSONRequest jreq;
         try
         {
             // Parse request
             Value valRequest;
-            if (!read_string(strRequest, valRequest) || valRequest.type() != obj_type)
+            if (!read_string(strRequest, valRequest))
                 throw JSONRPCError(-32700, "Parse error");
-            const Object& request = valRequest.get_obj();
 
-            // Parse id now so errors from here on will have the id
-            id = find_value(request, "id");
+            string strReply;
 
-            // Parse method
-            Value valMethod = find_value(request, "method");
-            if (valMethod.type() == null_type)
-                throw JSONRPCError(-32600, "Missing method");
-            if (valMethod.type() != str_type)
-                throw JSONRPCError(-32600, "Method must be a string");
-            string strMethod = valMethod.get_str();
-            if (strMethod != "getwork" && strMethod != "getmemorypool")
-                printf("ThreadRPCServer method=%s\n", strMethod.c_str());
+            // singleton request
+            if (valRequest.type() == obj_type) {
+                jreq.parse(valRequest);
 
-            // Parse params
-            Value valParams = find_value(request, "params");
-            Array params;
-            if (valParams.type() == array_type)
-                params = valParams.get_array();
-            else if (valParams.type() == null_type)
-                params = Array();
-            else
-                throw JSONRPCError(-32600, "Params must be an array");
-
-            // Find method
-            map<string, rpcfn_type>::iterator mi = mapCallTable.find(strMethod);
-            if (mi == mapCallTable.end())
-                throw JSONRPCError(-32601, "Method not found");
-
-            // Observe safe mode
-            string strWarning = GetWarnings("rpc");
-            if (strWarning != "" && !GetBoolArg("-disablesafemode") && !setAllowInSafeMode.count(strMethod))
-                throw JSONRPCError(-2, string("Safe mode: ") + strWarning);
-
-            try
-            {
-                // Execute
-                Value result;
-                CRITICAL_BLOCK(cs_main)
-                CRITICAL_BLOCK(pwalletMain->cs_wallet)
-                    result = (*(*mi).second)(params, false);
+                Value result = tableRPC.execute(jreq.strMethod, jreq.params);
 
                 // Send reply
-                string strReply = JSONRPCReply(result, Value::null, id);
-                stream << HTTPReply(200, strReply) << std::flush;
-            }
-            catch (std::exception& e)
-            {
-                ErrorReply(stream, JSONRPCError(-1, e.what()), id);
-            }
+                strReply = JSONRPCReply(result, Value::null, jreq.id);
+
+            // array of requests
+            } else if (valRequest.type() == array_type)
+                strReply = JSONRPCExecBatch(valRequest.get_array());
+            else
+                throw JSONRPCError(-32700, "Top-level object parse error");
+                
+            conn->stream() << HTTPReply(200, strReply, fRun) << std::flush;
         }
         catch (Object& objError)
         {
-            ErrorReply(stream, objError, id);
+            ErrorReply(conn->stream(), objError, jreq.id);
+            break;
         }
         catch (std::exception& e)
         {
-            ErrorReply(stream, JSONRPCError(-32700, e.what()), id);
+            ErrorReply(conn->stream(), JSONRPCError(-32700, e.what()), jreq.id);
+            break;
         }
+    }
+
+    delete conn;
+    {
+        LOCK(cs_THREAD_RPCHANDLER);
+        vnThreadsRunning[THREAD_RPCHANDLER]--;
     }
 }
 
+json_spirit::Value CRPCTable::execute(const std::string &strMethod, const json_spirit::Array &params) const
+{
+    // Find method
+    const CRPCCommand *pcmd = tableRPC[strMethod];
+    if (!pcmd)
+        throw JSONRPCError(-32601, "Method not found");
 
+    // Observe safe mode
+    string strWarning = GetWarnings("rpc");
+    if (strWarning != "" && !GetBoolArg("-disablesafemode") &&
+        !pcmd->okSafeMode)
+        throw JSONRPCError(-2, string("Safe mode: ") + strWarning);
+
+    try
+    {
+        // Execute
+        Value result;
+        {
+            if (pcmd->unlocked)
+                result = pcmd->actor(params, false);
+            else {
+                LOCK2(cs_main, pwalletMain->cs_wallet);
+                result = pcmd->actor(params, false);
+            }
+        }
+        return result;
+    }
+    catch (std::exception& e)
+    {
+        throw JSONRPCError(-1, e.what());
+    }
+}
 
 
 Object CallRPC(const string& strMethod, const Array& params)
@@ -3013,28 +1031,18 @@ Object CallRPC(const string& strMethod, const Array& params)
         throw runtime_error(strprintf(
             _("You must set rpcpassword=<password> in the configuration file:\n%s\n"
               "If the file does not exist, create it with owner-readable-only file permissions."),
-                GetConfigFile().c_str()));
+                GetConfigFile().string().c_str()));
 
     // Connect to localhost
     bool fUseSSL = GetBoolArg("-rpcssl");
-#ifdef USE_SSL
     asio::io_service io_service;
     ssl::context context(io_service, ssl::context::sslv23);
     context.set_options(ssl::context::no_sslv2);
-    SSLStream sslStream(io_service, context);
-    SSLIOStreamDevice d(sslStream, fUseSSL);
-    iostreams::stream<SSLIOStreamDevice> stream(d);
-    if (!d.connect(GetArg("-rpcconnect", "127.0.0.1"), GetArg("-rpcport", "7332")))
+    asio::ssl::stream<asio::ip::tcp::socket> sslStream(io_service, context);
+    SSLIOStreamDevice<asio::ip::tcp> d(sslStream, fUseSSL);
+    iostreams::stream< SSLIOStreamDevice<asio::ip::tcp> > stream(d);
+    if (!d.connect(GetArg("-rpcconnect", "127.0.0.1"), GetArg("-rpcport", "8332")))
         throw runtime_error("couldn't connect to server");
-#else
-    if (fUseSSL)
-        throw runtime_error("-rpcssl=1, but i0coin compiled without full openssl libraries.");
-
-    ip::tcp::iostream stream(GetArg("-rpcconnect", "127.0.0.1"), GetArg("-rpcport", "7332"));
-    if (stream.fail())
-        throw runtime_error("couldn't connect to server");
-#endif
-
 
     // HTTP basic authentication
     string strUserPass64 = EncodeBase64(mapArgs["-rpcuser"] + ":" + mapArgs["-rpcpassword"]);
@@ -3072,20 +1080,75 @@ Object CallRPC(const string& strMethod, const Array& params)
 
 
 template<typename T>
-void ConvertTo(Value& value)
+void ConvertTo(Value& value, bool fAllowNull=false)
 {
+    if (fAllowNull && value.type() == null_type)
+        return;
     if (value.type() == str_type)
     {
         // reinterpret string as unquoted json value
         Value value2;
-        if (!read_string(value.get_str(), value2))
-            throw runtime_error("type mismatch");
-        value = value2.get_value<T>();
+        string strJSON = value.get_str();
+        if (!read_string(strJSON, value2))
+            throw runtime_error(string("Error parsing JSON:")+strJSON);
+        ConvertTo<T>(value2, fAllowNull);
+        value = value2;
     }
     else
     {
         value = value.get_value<T>();
     }
+}
+
+// Convert strings to command-specific RPC representation
+Array RPCConvertValues(const std::string &strMethod, const std::vector<std::string> &strParams)
+{
+    Array params;
+    BOOST_FOREACH(const std::string &param, strParams)
+        params.push_back(param);
+
+    int n = params.size();
+
+    //
+    // Special case non-string parameter types
+    //
+    if (strMethod == "setgenerate"            && n > 0) ConvertTo<bool>(params[0]);
+    if (strMethod == "setgenerate"            && n > 1) ConvertTo<boost::int64_t>(params[1]);
+    if (strMethod == "sendtoaddress"          && n > 1) ConvertTo<double>(params[1]);
+    if (strMethod == "settxfee"               && n > 0) ConvertTo<double>(params[0]);
+    if (strMethod == "getreceivedbyaddress"   && n > 1) ConvertTo<boost::int64_t>(params[1]);
+    if (strMethod == "getreceivedbyaccount"   && n > 1) ConvertTo<boost::int64_t>(params[1]);
+    if (strMethod == "listreceivedbyaddress"  && n > 0) ConvertTo<boost::int64_t>(params[0]);
+    if (strMethod == "listreceivedbyaddress"  && n > 1) ConvertTo<bool>(params[1]);
+    if (strMethod == "listreceivedbyaccount"  && n > 0) ConvertTo<boost::int64_t>(params[0]);
+    if (strMethod == "listreceivedbyaccount"  && n > 1) ConvertTo<bool>(params[1]);
+    if (strMethod == "getbalance"             && n > 1) ConvertTo<boost::int64_t>(params[1]);
+    if (strMethod == "getblockhash"           && n > 0) ConvertTo<boost::int64_t>(params[0]);
+    if (strMethod == "move"                   && n > 2) ConvertTo<double>(params[2]);
+    if (strMethod == "move"                   && n > 3) ConvertTo<boost::int64_t>(params[3]);
+    if (strMethod == "sendfrom"               && n > 2) ConvertTo<double>(params[2]);
+    if (strMethod == "sendfrom"               && n > 3) ConvertTo<boost::int64_t>(params[3]);
+    if (strMethod == "listtransactions"       && n > 1) ConvertTo<boost::int64_t>(params[1]);
+    if (strMethod == "listtransactions"       && n > 2) ConvertTo<boost::int64_t>(params[2]);
+    if (strMethod == "listaccounts"           && n > 0) ConvertTo<boost::int64_t>(params[0]);
+    if (strMethod == "walletpassphrase"       && n > 1) ConvertTo<boost::int64_t>(params[1]);
+    if (strMethod == "getblocktemplate"       && n > 0) ConvertTo<Object>(params[0]);
+    if (strMethod == "listsinceblock"         && n > 1) ConvertTo<boost::int64_t>(params[1]);
+    if (strMethod == "sendmany"               && n > 1) ConvertTo<Object>(params[1]);
+    if (strMethod == "sendmany"               && n > 2) ConvertTo<boost::int64_t>(params[2]);
+    if (strMethod == "addmultisigaddress"     && n > 0) ConvertTo<boost::int64_t>(params[0]);
+    if (strMethod == "addmultisigaddress"     && n > 1) ConvertTo<Array>(params[1]);
+    if (strMethod == "listunspent"            && n > 0) ConvertTo<boost::int64_t>(params[0]);
+    if (strMethod == "listunspent"            && n > 1) ConvertTo<boost::int64_t>(params[1]);
+    if (strMethod == "listunspent"            && n > 2) ConvertTo<Array>(params[2]);
+    if (strMethod == "getrawtransaction"      && n > 1) ConvertTo<boost::int64_t>(params[1]);
+    if (strMethod == "createrawtransaction"   && n > 0) ConvertTo<Array>(params[0]);
+    if (strMethod == "createrawtransaction"   && n > 1) ConvertTo<Object>(params[1]);
+    if (strMethod == "signrawtransaction"     && n > 1) ConvertTo<Array>(params[1], true);
+    if (strMethod == "signrawtransaction"     && n > 2) ConvertTo<Array>(params[2], true);
+    if (strMethod == "getworkaux"             && n > 2) ConvertTo<boost::int64_t>(params[2]);
+
+    return params;
 }
 
 int CommandLineRPC(int argc, char *argv[])
@@ -3107,55 +1170,8 @@ int CommandLineRPC(int argc, char *argv[])
         string strMethod = argv[1];
 
         // Parameters default to strings
-        Array params;
-        for (int i = 2; i < argc; i++)
-            params.push_back(argv[i]);
-        int n = params.size();
-
-        //
-        // Special case non-string parameter types
-        //
-        if (strMethod == "setgenerate"            && n > 0) ConvertTo<bool>(params[0]);
-        if (strMethod == "setgenerate"            && n > 1) ConvertTo<boost::int64_t>(params[1]);
-        if (strMethod == "sendtoaddress"          && n > 1) ConvertTo<double>(params[1]);
-        if (strMethod == "settxfee"               && n > 0) ConvertTo<double>(params[0]);
-        if (strMethod == "getreceivedbyaddress"   && n > 1) ConvertTo<boost::int64_t>(params[1]);
-        if (strMethod == "getreceivedbyaccount"   && n > 1) ConvertTo<boost::int64_t>(params[1]);
-        if (strMethod == "listreceivedbyaddress"  && n > 0) ConvertTo<boost::int64_t>(params[0]);
-        if (strMethod == "listreceivedbyaddress"  && n > 1) ConvertTo<bool>(params[1]);
-        if (strMethod == "listreceivedbyaccount"  && n > 0) ConvertTo<boost::int64_t>(params[0]);
-        if (strMethod == "listreceivedbyaccount"  && n > 1) ConvertTo<bool>(params[1]);
-        if (strMethod == "getbalance"             && n > 1) ConvertTo<boost::int64_t>(params[1]);
-        if (strMethod == "getblockhash"           && n > 0) ConvertTo<boost::int64_t>(params[0]);
-        if (strMethod == "move"                   && n > 2) ConvertTo<double>(params[2]);
-        if (strMethod == "move"                   && n > 3) ConvertTo<boost::int64_t>(params[3]);
-        if (strMethod == "sendfrom"               && n > 2) ConvertTo<double>(params[2]);
-        if (strMethod == "sendfrom"               && n > 3) ConvertTo<boost::int64_t>(params[3]);
-        if (strMethod == "listtransactions"       && n > 1) ConvertTo<boost::int64_t>(params[1]);
-        if (strMethod == "listtransactions"       && n > 2) ConvertTo<boost::int64_t>(params[2]);
-        if (strMethod == "getworkaux"             && n > 2) ConvertTo<boost::int64_t>(params[2]);
-        if (strMethod == "listaccounts"           && n > 0) ConvertTo<boost::int64_t>(params[0]);
-	if (strMethod == "getblockbycount"        && n > 0) ConvertTo<boost::int64_t>(params[0]);
-        if (strMethod == "walletpassphrase"       && n > 1) ConvertTo<boost::int64_t>(params[1]);
-        if (strMethod == "listsinceblock"         && n > 1) ConvertTo<boost::int64_t>(params[1]);
-        if (strMethod == "sendmany"               && n > 1)
-        {
-            string s = params[1].get_str();
-            Value v;
-            if (!read_string(s, v) || v.type() != obj_type)
-                throw runtime_error("type mismatch");
-            params[1] = v.get_obj();
-        }
-        if (strMethod == "sendmany"                && n > 2) ConvertTo<boost::int64_t>(params[2]);
-        if (strMethod == "addmultisigaddress"      && n > 0) ConvertTo<boost::int64_t>(params[0]);
-        if (strMethod == "addmultisigaddress"      && n > 1)
-        {
-            string s = params[1].get_str();
-            Value v;
-            if (!read_string(s, v) || v.type() != array_type)
-                throw runtime_error("type mismatch "+s);
-            params[1] = v.get_array();
-        }
+        std::vector<std::string> strParams(&argv[2], &argv[argc]);
+        Array params = RPCConvertValues(strMethod, strParams);
 
         // Execute
         Object reply = CallRPC(strMethod, params);
@@ -3206,7 +1222,7 @@ int CommandLineRPC(int argc, char *argv[])
 int main(int argc, char *argv[])
 {
 #ifdef _MSC_VER
-    // Turn off microsoft heap dump noise
+    // Turn off Microsoft heap dump noise
     _CrtSetReportMode(_CRT_WARN, _CRTDBG_MODE_FILE);
     _CrtSetReportFile(_CRT_WARN, CreateFile("NUL", GENERIC_WRITE, 0, NULL, OPEN_EXISTING, 0, 0));
 #endif
@@ -3234,3 +1250,5 @@ int main(int argc, char *argv[])
     return 0;
 }
 #endif
+
+const CRPCTable tableRPC;

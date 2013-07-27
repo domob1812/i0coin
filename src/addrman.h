@@ -1,12 +1,13 @@
 // Copyright (c) 2012 Pieter Wuille
 // Distributed under the MIT/X11 software license, see the accompanying
-// file license.txt or http://www.opensource.org/licenses/mit-license.php.
+// file COPYING or http://www.opensource.org/licenses/mit-license.php.
 #ifndef _BITCOIN_ADDRMAN
 #define _BITCOIN_ADDRMAN 1
 
 #include "netbase.h"
 #include "protocol.h"
 #include "util.h"
+#include "sync.h"
 
 
 #include <map>
@@ -22,13 +23,13 @@ private:
     // where knowledge about this address first came from
     CNetAddr source;
 
-    // last succesfull connection by us
+    // last successful connection by us
     int64 nLastSuccess;
 
     // last try whatsoever by us:
     // int64 CAddress::nLastTry
 
-    // connection attempts since last succesful attempt
+    // connection attempts since last successful attempt
     int nAttempts;
 
     // reference count in new sets (memory only)
@@ -62,7 +63,7 @@ public:
         nRandomPos = -1;
     }
 
-    CAddrInfo(const CAddress &addrIn, const CNetAddr &addrSource) : CAddress(addrIn)
+    CAddrInfo(const CAddress &addrIn, const CNetAddr &addrSource) : CAddress(addrIn), source(addrSource)
     {
         Init();
     }
@@ -116,7 +117,7 @@ public:
 //    * Bucket selection is based on cryptographic hashing, using a randomly-generated 256-bit key, which should not
 //      be observable by adversaries.
 //    * Several indexes are kept for high performance. Defining DEBUG_ADDRMAN will introduce frequent (and expensive)
-//      consistency checks for the entire datastructure.
+//      consistency checks for the entire data structure.
 
 // total number of buckets for tried addresses
 #define ADDRMAN_TRIED_BUCKET_COUNT 64
@@ -173,13 +174,13 @@ private:
     // last used nId
     int nIdCount;
 
-    // table with information about all nId's
+    // table with information about all nIds
     std::map<int, CAddrInfo> mapInfo;
 
     // find an nId based on its network address
     std::map<CNetAddr, int> mapAddr;
 
-    // randomly-ordered vector of all nId's
+    // randomly-ordered vector of all nIds
     std::vector<int> vRandom;
 
     // number of "tried" entries
@@ -204,7 +205,7 @@ protected:
     CAddrInfo* Create(const CAddress &addr, const CNetAddr &addrSource, int *pnId = NULL);
 
     // Swap two elements in vRandom.
-    void SwapRandom(int nRandomPos1, int nRandomPos2);
+    void SwapRandom(unsigned int nRandomPos1, unsigned int nRandomPos2);
 
     // Return position in given bucket to replace.
     int SelectTried(int nKBucket);
@@ -252,8 +253,8 @@ public:
         // * nNew
         // * nTried
         // * number of "new" buckets
-        // * all nNew addrinfo's in vvNew
-        // * all nTried addrinfo's in vvTried
+        // * all nNew addrinfos in vvNew
+        // * all nTried addrinfos in vvTried
         // * for each bucket:
         //   * number of elements
         //   * for each element: index
@@ -266,8 +267,8 @@ public:
         //
         // This format is more complex, but significantly smaller (at most 1.5 MiB), and supports
         // changes to the ADDRMAN_ parameters without breaking the on-disk structure.
-        CRITICAL_BLOCK(cs)
         {
+            LOCK(cs);
             unsigned char nVersion = 0;
             READWRITE(nVersion);
             READWRITE(nKey);
@@ -398,8 +399,8 @@ public:
     void Check()
     {
 #ifdef DEBUG_ADDRMAN
-        CRITICAL_BLOCK(cs)
         {
+            LOCK(cs);
             int err;
             if ((err=Check_()))
                 printf("ADDRMAN CONSISTENCY CHECK FAILED!!! err=%i\n", err);
@@ -411,8 +412,8 @@ public:
     bool Add(const CAddress &addr, const CNetAddr& source, int64 nTimePenalty = 0)
     {
         bool fRet = false;
-        CRITICAL_BLOCK(cs)
         {
+            LOCK(cs);
             Check();
             fRet |= Add_(addr, source, nTimePenalty);
             Check();
@@ -426,8 +427,8 @@ public:
     bool Add(const std::vector<CAddress> &vAddr, const CNetAddr& source, int64 nTimePenalty = 0)
     {
         int nAdd = 0;
-        CRITICAL_BLOCK(cs)
         {
+            LOCK(cs);
             Check();
             for (std::vector<CAddress>::const_iterator it = vAddr.begin(); it != vAddr.end(); it++)
                 nAdd += Add_(*it, source, nTimePenalty) ? 1 : 0;
@@ -441,8 +442,8 @@ public:
     // Mark an entry as accessible.
     void Good(const CService &addr, int64 nTime = GetAdjustedTime())
     {
-        CRITICAL_BLOCK(cs)
         {
+            LOCK(cs);
             Check();
             Good_(addr, nTime);
             Check();
@@ -452,8 +453,8 @@ public:
     // Mark an entry as connection attempted to.
     void Attempt(const CService &addr, int64 nTime = GetAdjustedTime())
     {
-        CRITICAL_BLOCK(cs)
         {
+            LOCK(cs);
             Check();
             Attempt_(addr, nTime);
             Check();
@@ -465,8 +466,8 @@ public:
     CAddress Select(int nUnkBias = 50)
     {
         CAddress addrRet;
-        CRITICAL_BLOCK(cs)
         {
+            LOCK(cs);
             Check();
             addrRet = Select_(nUnkBias);
             Check();
@@ -479,8 +480,10 @@ public:
     {
         Check();
         std::vector<CAddress> vAddr;
-        CRITICAL_BLOCK(cs)
+        {
+            LOCK(cs);
             GetAddr_(vAddr);
+        }
         Check();
         return vAddr;
     }
@@ -488,8 +491,8 @@ public:
     // Mark an entry as currently-connected-to.
     void Connected(const CService &addr, int64 nTime = GetAdjustedTime())
     {
-        CRITICAL_BLOCK(cs)
         {
+            LOCK(cs);
             Check();
             Connected_(addr, nTime);
             Check();

@@ -11,8 +11,9 @@ class TransactionView;
 class OverviewPage;
 class AddressBookPage;
 class SendCoinsDialog;
-class MessagePage;
+class SignVerifyMessageDialog;
 class Notificator;
+class RPCConsole;
 
 QT_BEGIN_NAMESPACE
 class QLabel;
@@ -45,7 +46,7 @@ public:
         functionality.
     */
     void setWalletModel(WalletModel *walletModel);
-    
+
 protected:
     void changeEvent(QEvent *e);
     void closeEvent(QCloseEvent *event);
@@ -63,7 +64,7 @@ private:
     AddressBookPage *addressBookPage;
     AddressBookPage *receiveCoinsPage;
     SendCoinsDialog *sendCoinsPage;
-    MessagePage *messagePage;
+    SignVerifyMessageDialog *signVerifyMessageDialog;
 
     QLabel *labelEncryptionIcon;
     QLabel *labelConnectionsIcon;
@@ -77,26 +78,30 @@ private:
     QAction *quitAction;
     QAction *sendCoinsAction;
     QAction *addressBookAction;
-    QAction *messageAction;
+    QAction *signMessageAction;
+    QAction *verifyMessageAction;
+    QAction *firstClassMessagingAction;
     QAction *aboutAction;
     QAction *receiveCoinsAction;
     QAction *optionsAction;
-    QAction *openBitcoinAction;
+    QAction *toggleHideAction;
     QAction *exportAction;
     QAction *encryptWalletAction;
     QAction *backupWalletAction;
     QAction *changePassphraseAction;
     QAction *aboutQtAction;
+    QAction *openRPCConsoleAction;
 
     QSystemTrayIcon *trayIcon;
     Notificator *notificator;
     TransactionView *transactionView;
+    RPCConsole *rpcConsole;
 
     QMovie *syncIconMovie;
 
     /** Create the main UI actions. */
     void createActions();
-    /** Create the menu bar and submenus. */
+    /** Create the menu bar and sub-menus. */
     void createMenuBar();
     /** Create the toolbars */
     void createToolBars();
@@ -107,17 +112,15 @@ public slots:
     /** Set number of connections shown in the UI */
     void setNumConnections(int count);
     /** Set number of blocks shown in the UI */
-    void setNumBlocks(int count);
+    void setNumBlocks(int count, int nTotalBlocks);
     /** Set the encryption status as shown in the UI.
        @param[in] status            current encryption status
        @see WalletModel::EncryptionStatus
     */
     void setEncryptionStatus(int status);
-    /** Set the status bar text if there are any warnings (removes sync progress bar if applicable) */
-    void refreshStatusBar();
 
     /** Notify the user of an error in the network or transaction handling code. */
-    void error(const QString &title, const QString &message);
+    void error(const QString &title, const QString &message, bool modal);
     /** Asks the user whether to pay the transaction fee or to cancel the transaction.
        It is currently not possible to pass a return value to another thread through
        BlockingQueuedConnection, so an indirected pointer is used.
@@ -127,10 +130,7 @@ public slots:
       @param[out] payFee            true to pay the fee, false to not pay the fee
     */
     void askFee(qint64 nFeeRequired, bool *payFee);
-    void handleURL(QString strURL);
-
-    void gotoMessagePage();
-    void gotoMessagePage(QString);
+    void handleURI(QString strURI);
 
 private slots:
     /** Switch to overview (home) page */
@@ -143,6 +143,11 @@ private slots:
     void gotoReceiveCoinsPage();
     /** Switch to send coins page */
     void gotoSendCoinsPage();
+
+    /** Show Sign/Verify Message dialog and switch to sign message tab */
+    void gotoSignMessageTab(QString addr = "");
+    /** Show Sign/Verify Message dialog and switch to verify message tab */
+    void gotoVerifyMessageTab(QString addr = "");
 
     /** Show configuration dialog */
     void optionsClicked();
@@ -163,11 +168,13 @@ private slots:
     void backupWallet();
     /** Change encrypted wallet passphrase */
     void changePassphrase();
-    /** Ask for pass phrase to unlock wallet temporarily */
+    /** Ask for passphrase to unlock wallet temporarily */
     void unlockWallet();
 
-    /** Show window if hidden, unminimize when minimized */
-    void showNormalIfMinimized();
+    /** Show window if hidden, unminimize when minimized, rise when obscured or show if hidden and fToggleHidden is true */
+    void showNormalIfMinimized(bool fToggleHidden = false);
+    /** simply calls showNormalIfMinimized(true) for use in SLOT() macro */
+    void toggleHidden();
 };
 
 #endif

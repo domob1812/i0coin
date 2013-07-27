@@ -81,12 +81,14 @@ TransactionView::TransactionView(QWidget *parent) :
 
     addressWidget = new QLineEdit(this);
 #if QT_VERSION >= 0x040700
+    /* Do not move this to the XML file, Qt before 4.7 will choke on it */
     addressWidget->setPlaceholderText(tr("Enter address or label to search"));
 #endif
     hlayout->addWidget(addressWidget);
 
     amountWidget = new QLineEdit(this);
 #if QT_VERSION >= 0x040700
+    /* Do not move this to the XML file, Qt before 4.7 will choke on it */
     amountWidget->setPlaceholderText(tr("Min amount"));
 #endif
 #ifdef Q_WS_MAC
@@ -125,7 +127,7 @@ TransactionView::TransactionView(QWidget *parent) :
     QAction *copyLabelAction = new QAction(tr("Copy label"), this);
     QAction *copyAmountAction = new QAction(tr("Copy amount"), this);
     QAction *editLabelAction = new QAction(tr("Edit label"), this);
-    QAction *showDetailsAction = new QAction(tr("Show details..."), this);
+    QAction *showDetailsAction = new QAction(tr("Show transaction details"), this);
 
     contextMenu = new QMenu();
     contextMenu->addAction(copyAddressAction);
@@ -158,6 +160,8 @@ void TransactionView::setModel(WalletModel *model)
         transactionProxyModel = new TransactionFilterProxy(this);
         transactionProxyModel->setSourceModel(model->getTransactionTableModel());
         transactionProxyModel->setDynamicSortFilter(true);
+        transactionProxyModel->setSortCaseSensitivity(Qt::CaseInsensitive);
+        transactionProxyModel->setFilterCaseSensitivity(Qt::CaseInsensitive);
 
         transactionProxyModel->setSortRole(Qt::EditRole);
 
@@ -201,7 +205,7 @@ void TransactionView::chooseDate(int idx)
                 TransactionFilterProxy::MAX_DATE);
         break;
     case ThisWeek: {
-        // Find last monday
+        // Find last Monday
         QDate startOfWeek = current.addDays(-(current.dayOfWeek()-1));
         transactionProxyModel->setDateRange(
                 QDateTime(startOfWeek),
@@ -414,4 +418,14 @@ void TransactionView::dateRangeChanged()
     transactionProxyModel->setDateRange(
             QDateTime(dateFrom->date()),
             QDateTime(dateTo->date()).addDays(1));
+}
+
+void TransactionView::focusTransaction(const QModelIndex &idx)
+{
+    if(!transactionProxyModel)
+        return;
+    QModelIndex targetIdx = transactionProxyModel->mapFromSource(idx);
+    transactionView->scrollTo(targetIdx);
+    transactionView->setCurrentIndex(targetIdx);
+    transactionView->setFocus();
 }

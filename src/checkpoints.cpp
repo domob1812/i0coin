@@ -1,12 +1,14 @@
 // Copyright (c) 2011 The Bitcoin developers
 // Distributed under the MIT/X11 software license, see the accompanying
-// file license.txt or http://www.opensource.org/licenses/mit-license.php.
+// file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
 #include <boost/assign/list_of.hpp> // for 'map_list_of()'
 #include <boost/foreach.hpp>
 
-#include "headers.h"
 #include "checkpoints.h"
+
+#include "main.h"
+#include "uint256.h"
 
 namespace Checkpoints
 {
@@ -32,30 +34,35 @@ namespace Checkpoints
 	( 142900, uint256("0x00000000005eb49db6f29a6aae382b7a8e9a109aba42e536e6d74b95aba4dffd"))
 	( 155000, uint256("0x0000000000041a6bc4cd419ed90a6bb1dbf8df8a587d162504dba9ae84a4418c"))
 	( 161000, uint256("0x601581f84984f86f5c4d080b2e32bd1c4da4061730fd9bc6b4ce08c65b30c4bd"))
-        ;
+	;
+
+    /* i0coin had not testnet checkblocks, if they even start to exist, they can be added here */
+    static MapCheckpoints mapCheckpointsTestnet; // = 
+        //boost::assign::map_list_of
+	// ( insert testnet checkpoints here, just like above )
+        //;
 
     bool CheckBlock(int nHeight, const uint256& hash)
     {
-        if (fTestNet) return true; // Testnet has no checkpoints
+        MapCheckpoints& checkpoints = (fTestNet ? mapCheckpointsTestnet : mapCheckpoints);
 
-        MapCheckpoints::const_iterator i = mapCheckpoints.find(nHeight);
-        if (i == mapCheckpoints.end()) return true;
+        MapCheckpoints::const_iterator i = checkpoints.find(nHeight);
+        if (i == checkpoints.end()) return true;
         return hash == i->second;
     }
 
     int GetTotalBlocksEstimate()
     {
-        if (fTestNet) return 0;
+        MapCheckpoints& checkpoints = (fTestNet ? mapCheckpointsTestnet : mapCheckpoints);
 
-        return mapCheckpoints.rbegin()->first;
+        return checkpoints.rbegin()->first;
     }
 
     CBlockIndex* GetLastCheckpoint(const std::map<uint256, CBlockIndex*>& mapBlockIndex)
     {
-        if (fTestNet) return NULL;
+        MapCheckpoints& checkpoints = (fTestNet ? mapCheckpointsTestnet : mapCheckpoints);
 
-        int64 nResult;
-        BOOST_REVERSE_FOREACH(const MapCheckpoints::value_type& i, mapCheckpoints)
+        BOOST_REVERSE_FOREACH(const MapCheckpoints::value_type& i, checkpoints)
         {
             const uint256& hash = i.second;
             std::map<uint256, CBlockIndex*>::const_iterator t = mapBlockIndex.find(hash);

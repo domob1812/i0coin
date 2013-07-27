@@ -21,7 +21,7 @@ public:
     // root must be present inside the coinbase
     std::vector<uint256> vChainMerkleBranch;
     // Index of chain in chains merkle tree
-    int nChainIndex;
+    unsigned int nChainIndex;
     CBlock parentBlock;
 
     IMPLEMENT_SERIALIZE

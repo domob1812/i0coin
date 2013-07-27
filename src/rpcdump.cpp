@@ -1,31 +1,18 @@
 // Copyright (c) 2009-2012 Bitcoin Developers
 // Distributed under the MIT/X11 software license, see the accompanying
-// file license.txt or http://www.opensource.org/licenses/mit-license.php.
+// file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
-#include "headers.h"
 #include "init.h" // for pwalletMain
 #include "bitcoinrpc.h"
+#include "ui_interface.h"
+#include "base58.h"
 
-// #include <boost/asio.hpp>
-// #include <boost/iostreams/concepts.hpp>
-// #include <boost/iostreams/stream.hpp>
 #include <boost/lexical_cast.hpp>
-// #ifdef USE_SSL
-// #include <boost/asio/ssl.hpp> 
-// typedef boost::asio::ssl::stream<boost::asio::ip::tcp::socket> SSLStream;
-// #endif
-// #include <boost/xpressive/xpressive_dynamic.hpp>
-#include "json/json_spirit_reader_template.h"
-#include "json/json_spirit_writer_template.h"
-#include "json/json_spirit_utils.h"
 
 #define printf OutputDebugStringF
 
-// using namespace boost::asio;
 using namespace json_spirit;
 using namespace std;
-
-extern Object JSONRPCError(int code, const string& message);
 
 class CTxDump
 {
@@ -49,7 +36,7 @@ Value importprivkey(const Array& params, bool fHelp)
 {
     if (fHelp || params.size() < 1 || params.size() > 2)
         throw runtime_error(
-            "importprivkey <bitcoinprivkey> [label]\n"
+            "importprivkey <i0coinprivkey> [label]\n"
             "Adds a private key (as returned by dumpprivkey) to your wallet.");
 
     string strSecret = params[0].get_str();
@@ -65,11 +52,10 @@ Value importprivkey(const Array& params, bool fHelp)
     bool fCompressed;
     CSecret secret = vchSecret.GetSecret(fCompressed);
     key.SetSecret(secret, fCompressed);
-    CBitcoinAddress vchAddress = CBitcoinAddress(key.GetPubKey());
-
-    CRITICAL_BLOCK(cs_main)
-    CRITICAL_BLOCK(pwalletMain->cs_wallet)
+    CKeyID vchAddress = key.GetPubKey().GetID();
     {
+        LOCK2(cs_main, pwalletMain->cs_wallet);
+
         pwalletMain->MarkDirty();
         pwalletMain->SetAddressBookName(vchAddress, strLabel);
 
@@ -80,8 +66,6 @@ Value importprivkey(const Array& params, bool fHelp)
         pwalletMain->ReacceptWalletTransactions();
     }
 
-    MainFrameRepaint();
-
     return Value::null;
 }
 
@@ -89,16 +73,19 @@ Value dumpprivkey(const Array& params, bool fHelp)
 {
     if (fHelp || params.size() != 1)
         throw runtime_error(
-            "dumpprivkey <bitcoinaddress>\n"
-            "Reveals the private key corresponding to <bitcoinaddress>.");
+            "dumpprivkey <i0coinaddress>\n"
+            "Reveals the private key corresponding to <i0coinaddress>.");
 
     string strAddress = params[0].get_str();
     CBitcoinAddress address;
     if (!address.SetString(strAddress))
-        throw JSONRPCError(-5, "Invalid bitcoin address");
+        throw JSONRPCError(-5, "Invalid I0coin address");
+    CKeyID keyID;
+    if (!address.GetKeyID(keyID))
+        throw JSONRPCError(-3, "Address does not refer to a key");
     CSecret vchSecret;
     bool fCompressed;
-    if (!pwalletMain->GetSecret(address, vchSecret, fCompressed))
+    if (!pwalletMain->GetSecret(keyID, vchSecret, fCompressed))
         throw JSONRPCError(-4,"Private key for address " + strAddress + " is not known");
     return CBitcoinSecret(vchSecret, fCompressed).ToString();
 }

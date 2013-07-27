@@ -1,7 +1,7 @@
 // Copyright (c) 2009-2010 Satoshi Nakamoto
 // Copyright (c) 2009-2012 The Bitcoin developers
 // Distributed under the MIT/X11 software license, see the accompanying
-// file license.txt or http://www.opensource.org/licenses/mit-license.php.
+// file COPYING or http://www.opensource.org/licenses/mit-license.php.
 #ifndef BITCOIN_BIGNUM_H
 #define BITCOIN_BIGNUM_H
 
@@ -9,7 +9,7 @@
 #include <vector>
 #include <openssl/bn.h>
 
-#include "util.h"
+#include "util.h" // for uint64
 
 /** Errors thrown by the bignum class */
 class bignum_error : public std::runtime_error
@@ -47,7 +47,7 @@ public:
 };
 
 
-/** C++ wrapper for BIGNUM (OpenSSl bignum) */
+/** C++ wrapper for BIGNUM (OpenSSL bignum) */
 class CBigNum : public BIGNUM
 {
 public:
@@ -78,7 +78,8 @@ public:
         BN_clear_free(this);
     }
 
-    CBigNum(char n)             { BN_init(this); if (n >= 0) setulong(n); else setint64(n); }
+    //CBigNum(char n) is not portable.  Use 'signed char' or 'unsigned char'.
+    CBigNum(signed char n)      { BN_init(this); if (n >= 0) setulong(n); else setint64(n); }
     CBigNum(short n)            { BN_init(this); if (n >= 0) setulong(n); else setint64(n); }
     CBigNum(int n)              { BN_init(this); if (n >= 0) setulong(n); else setint64(n); }
     CBigNum(long n)             { BN_init(this); if (n >= 0) setulong(n); else setint64(n); }
@@ -116,21 +117,29 @@ public:
     {
         unsigned long n = BN_get_word(this);
         if (!BN_is_negative(this))
-            return (n > std::numeric_limits<int>::max() ? std::numeric_limits<int>::max() : n);
+            return (n > (unsigned long)std::numeric_limits<int>::max() ? std::numeric_limits<int>::max() : n);
         else
-            return (n > std::numeric_limits<int>::max() ? std::numeric_limits<int>::min() : -(int)n);
+            return (n > (unsigned long)std::numeric_limits<int>::max() ? std::numeric_limits<int>::min() : -(int)n);
     }
 
-    void setint64(int64 n)
+    void setint64(int64 sn)
     {
-        unsigned char pch[sizeof(n) + 6];
+        unsigned char pch[sizeof(sn) + 6];
         unsigned char* p = pch + 4;
-        bool fNegative = false;
-        if (n < (int64)0)
+        bool fNegative;
+        uint64 n;
+
+        if (sn < (int64)0)
         {
-            n = -n;
+            // Since the minimum signed integer cannot be represented as positive so long as its type is signed, and it's not well-defined what happens if you make it unsigned before negating it, we instead increment the negative integer by 1, convert it, then increment the (now positive) unsigned integer by 1 to compensate
+            n = -(sn + 1);
+            ++n;
             fNegative = true;
+        } else {
+            n = sn;
+            fNegative = false;
         }
+
         bool fLeadingZeroes = true;
         for (int i = 0; i < 8; i++)
         {
@@ -221,7 +230,7 @@ public:
         if (vch.size() > 4)
             vch[4] &= 0x7f;
         uint256 n = 0;
-        for (int i = 0, j = vch.size()-1; i < sizeof(n) && j >= 4; i++, j--)
+        for (unsigned int i = 0, j = vch.size()-1; i < sizeof(n) && j >= 4; i++, j--)
             ((unsigned char*)&n)[i] = vch[j];
         return n;
     }
@@ -296,12 +305,12 @@ public:
             psz++;
 
         // hex string to bignum
-        static char phexdigit[256] = { 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, 0,1,2,3,4,5,6,7,8,9,0,0,0,0,0,0, 0,0xa,0xb,0xc,0xd,0xe,0xf,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, 0,0xa,0xb,0xc,0xd,0xe,0xf,0,0,0,0,0,0,0,0,0 };
+        static signed char phexdigit[256] = { 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, 0,1,2,3,4,5,6,7,8,9,0,0,0,0,0,0, 0,0xa,0xb,0xc,0xd,0xe,0xf,0,0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, 0,0xa,0xb,0xc,0xd,0xe,0xf,0,0,0,0,0,0,0,0,0 };
         *this = 0;
         while (isxdigit(*psz))
         {
             *this <<= 4;
-            int n = phexdigit[*psz++];
+            int n = phexdigit[(unsigned char)*psz++];
             *this += n;
         }
         if (fNegative)
@@ -407,7 +416,7 @@ public:
     CBigNum& operator>>=(unsigned int shift)
     {
         // Note: BN_rshift segfaults on 64-bit if 2^shift is greater than the number
-        //   if built on ubuntu 9.04 or 9.10, probably depends on version of openssl
+        //   if built on ubuntu 9.04 or 9.10, probably depends on version of OpenSSL
         CBigNum a = 1;
         a <<= shift;
         if (BN_cmp(&a, this) > 0)
