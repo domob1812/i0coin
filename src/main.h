@@ -28,7 +28,7 @@ class CRequestTracker;
 class CNode;
 class CAuxPow;
 
-static const int CLIENT_VERSION = 60003;
+static const int CLIENT_VERSION = 60004;
 static const bool VERSION_IS_BETA = true;
 extern const std::string CLIENT_NAME;
 
