@@ -55,8 +55,6 @@
 #include <deque>
 #include <map>
 
-#include <boost/foreach.hpp>
-
 #ifdef WIN32
 #include <windows.h>
 #include <winsock2.h>
