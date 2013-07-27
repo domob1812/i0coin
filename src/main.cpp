@@ -1376,12 +1376,9 @@ bool CBlock::ConnectBlock(CTxDB& txdb, CBlockIndex* pindex)
                         return false;
         }
 
-    // To avoid being on the short end of a block-chain split,
-    // don't do secondary validation of pay-to-script-hash transactions
-    // until blocks with timestamps after paytoscripthashtime (see init.cpp for default).
-    // This code can be removed once a super-majority of the network has upgraded.
-    int64 nEvalSwitchTime = GetArg("-paytoscripthashtime", std::numeric_limits<int64_t>::max());
-    bool fStrictPayToScriptHash = (pindex->nTime >= nEvalSwitchTime);
+    // BIP16 didn't become active until Apr 1 2012 (Feb 15 on testnet)
+    int64 nBIP16SwitchTime = fTestNet ? 1329264000 : 1333238400;
+    bool fStrictPayToScriptHash = (pindex->nTime >= nBIP16SwitchTime);
 
     //// issue here: it doesn't know the version
     unsigned int nTxPos = pindex->nBlockPos + ::GetSerializeSize(CBlock(), SER_DISK) - 1 + GetSizeOfCompactSize(vtx.size());
@@ -1480,6 +1477,9 @@ bool static Reorganize(CTxDB& txdb, CBlockIndex* pindexNew)
         vConnect.push_back(pindex);
     reverse(vConnect.begin(), vConnect.end());
 
+    printf("REORGANIZE: Disconnect %i blocks; %s..%s\n", vDisconnect.size(), pfork->GetBlockHash().ToString().substr(0,20).c_str(), pindexBest->GetBlockHash().ToString().substr(0,20).c_str());
+    printf("REORGANIZE: Connect %i blocks; %s..%s\n", vConnect.size(), pfork->GetBlockHash().ToString().substr(0,20).c_str(), pindexNew->GetBlockHash().ToString().substr(0,20).c_str());
+
     // Disconnect shorter branch
     vector<CTransaction> vResurrect;
     BOOST_FOREACH(CBlockIndex* pindex, vDisconnect)
@@ -1488,7 +1488,7 @@ bool static Reorganize(CTxDB& txdb, CBlockIndex* pindexNew)
         if (!block.ReadFromDisk(pindex))
             return error("Reorganize() : ReadFromDisk for disconnect failed");
         if (!block.DisconnectBlock(txdb, pindex))
-            return error("Reorganize() : DisconnectBlock failed");
+            return error("Reorganize() : DisconnectBlock %s failed", pindex->GetBlockHash().ToString().substr(0,20).c_str());
 
         // Queue memory transactions to resurrect
         BOOST_FOREACH(const CTransaction& tx, block.vtx)
@@ -1508,7 +1508,7 @@ bool static Reorganize(CTxDB& txdb, CBlockIndex* pindexNew)
         {
             // Invalid block
             txdb.TxnAbort();
-            return error("Reorganize() : ConnectBlock failed");
+            return error("Reorganize() : ConnectBlock %s failed", pindex->GetBlockHash().ToString().substr(0,20).c_str());
         }
 
         // Queue memory transactions to delete
@@ -1540,8 +1540,7 @@ bool static Reorganize(CTxDB& txdb, CBlockIndex* pindexNew)
     BOOST_FOREACH(CTransaction& tx, vDelete)
         tx.RemoveFromMemoryPool();
 
-    printf("REORGANIZE: Disconnected %i blocks; %s..%s\n", vDisconnect.size(), pfork->GetBlockHash().ToString().substr(0,20).c_str(), pindexBest->GetBlockHash().ToString().substr(0,20).c_str());
-    printf("REORGANIZE: Connected %i blocks; %s..%s\n", vConnect.size(), pfork->GetBlockHash().ToString().substr(0,20).c_str(), pindexNew->GetBlockHash().ToString().substr(0,20).c_str());
+    printf("REORGANIZE: done\n");
 
     return true;
 }
@@ -1555,10 +1554,9 @@ runCommand(std::string strCommand)
         printf("runCommand error: system(%s) returned %d\n", strCommand.c_str(), nErr);
 }
 
+// Called from inside SetBestChain: attaches a block to the new best chain being built
 bool CBlock::SetBestChainInner(CTxDB& txdb, CBlockIndex *pindexNew)
 {
-    assert(pindexNew->pprev == pindexBest);
-
     uint256 hash = GetHash();
 
     // Adding to current best branch
@@ -1859,10 +1857,11 @@ bool CBlock::AcceptBlock()
         return error("AcceptBlock() : AddToBlockIndex failed");
 
     // Relay inventory, but don't relay old inventory during initial block download
+    int nBlockEstimate = Checkpoints::GetTotalBlocksEstimate();
     if (hashBestChain == hash)
         CRITICAL_BLOCK(cs_vNodes)
             BOOST_FOREACH(CNode* pnode, vNodes)
-                if (nBestHeight > (pnode->nStartingHeight != -1 ? pnode->nStartingHeight - 2000 : 830000))
+                if (nBestHeight > (pnode->nStartingHeight != -1 ? pnode->nStartingHeight - 2000 : nBlockEstimate))
                     pnode->PushInventory(CInv(MSG_BLOCK, hash));
 
     return true;
@@ -2389,10 +2388,17 @@ bool static ProcessMessage(CNode* pfrom, string strCommand, CDataStream& vRecv)
             }
 
             // Get recent addresses
-            if (pfrom->nVersion >= 31402 || mapAddresses.size() < 1000)
+            if (pfrom->nVersion >= 31402 || addrman.size() < 1000)
             {
                 pfrom->PushMessage("getaddr");
                 pfrom->fGetAddr = true;
+            }
+            addrman.Good(pfrom->addr);
+        } else {
+            if (((CNetAddr)pfrom->addr) == (CNetAddr)addrFrom)
+            {
+                addrman.Add(addrFrom, addrFrom);
+                addrman.Good(addrFrom);
             }
         }
 
@@ -2439,7 +2445,7 @@ bool static ProcessMessage(CNode* pfrom, string strCommand, CDataStream& vRecv)
         vRecv >> vAddr;
 
         // Don't want addr from older versions unless seeding
-        if (pfrom->nVersion < 31402 && mapAddresses.size() > 1000)
+        if (pfrom->nVersion < 31402 && addrman.size() > 1000)
             return true;
         if (vAddr.size() > 1000)
         {
@@ -2448,8 +2454,6 @@ bool static ProcessMessage(CNode* pfrom, string strCommand, CDataStream& vRecv)
         }
 
         // Store the new addresses
-        CAddrDB addrDB;
-        addrDB.TxnBegin();
         int64 nNow = GetAdjustedTime();
         int64 nSince = nNow - 10 * 60;
         BOOST_FOREACH(CAddress& addr, vAddr)
@@ -2461,7 +2465,6 @@ bool static ProcessMessage(CNode* pfrom, string strCommand, CDataStream& vRecv)
                 continue;
             if (addr.nTime <= 100000000 || addr.nTime > nNow + 10 * 60)
                 addr.nTime = nNow - 5 * 24 * 60 * 60;
-            AddAddress(addr, 2 * 60 * 60, &addrDB);
             pfrom->AddAddressKnown(addr);
             if (addr.nTime > nSince && !pfrom->fGetAddr && vAddr.size() <= 10 && addr.IsRoutable())
             {
@@ -2493,7 +2496,7 @@ bool static ProcessMessage(CNode* pfrom, string strCommand, CDataStream& vRecv)
                 }
             }
         }
-        addrDB.TxnCommit();  // Save addresses (it's ok if this fails)
+        addrman.Add(vAddr, pfrom->addr, 2 * 60 * 60);
         if (vAddr.size() < 1000)
             pfrom->fGetAddr = false;
     }
@@ -2510,8 +2513,10 @@ bool static ProcessMessage(CNode* pfrom, string strCommand, CDataStream& vRecv)
         }
 
         CTxDB txdb("r");
-        BOOST_FOREACH(const CInv& inv, vInv)
+        for (int nInv = 0; nInv < vInv.size(); nInv++)
         {
+            const CInv &inv = vInv[nInv];
+
             if (fShutdown)
                 return true;
             pfrom->AddInventoryKnown(inv);
@@ -2520,9 +2525,12 @@ bool static ProcessMessage(CNode* pfrom, string strCommand, CDataStream& vRecv)
             if (fDebug)
                 printf("  got inventory: %s  %s\n", inv.ToString().c_str(), fAlreadyHave ? "have" : "new");
 
-            if (!fAlreadyHave)
+            // Always request the last block in an inv bundle (even if we already have it), as it is the
+            // trigger for the other side to send further invs. If we are stuck on a (very long) side chain,
+            // this is necessary to connect earlier received orphan blocks to the chain again.
+            if (!fAlreadyHave || (inv.type == MSG_BLOCK && nInv==vInv.size()-1))
                 pfrom->AskFor(inv);
-            else if (inv.type == MSG_BLOCK && mapOrphanBlocks.count(inv.hash))
+            if (inv.type == MSG_BLOCK && mapOrphanBlocks.count(inv.hash))
                 pfrom->PushGetBlocks(pindexBest, GetOrphanRoot(mapOrphanBlocks[inv.hash]));
 
             // Track requests for our stuff
@@ -2739,25 +2747,10 @@ bool static ProcessMessage(CNode* pfrom, string strCommand, CDataStream& vRecv)
 
     else if (strCommand == "getaddr")
     {
-        // Nodes rebroadcast an addr every 24 hours
         pfrom->vAddrToSend.clear();
-        int64 nSince = GetAdjustedTime() - 3 * 60 * 60; // in the last 3 hours
-        CRITICAL_BLOCK(cs_mapAddresses)
-        {
-            unsigned int nCount = 0;
-            BOOST_FOREACH(const PAIRTYPE(vector<unsigned char>, CAddress)& item, mapAddresses)
-            {
-                const CAddress& addr = item.second;
-                if (addr.nTime > nSince)
-                    nCount++;
-            }
-            BOOST_FOREACH(const PAIRTYPE(vector<unsigned char>, CAddress)& item, mapAddresses)
-            {
-                const CAddress& addr = item.second;
-                if (addr.nTime > nSince && GetRand(nCount) < 2500)
-                    pfrom->PushAddress(addr);
-            }
-        }
+        vector<CAddress> vAddr = addrman.GetAddr();
+        BOOST_FOREACH(const CAddress &addr, vAddr)
+            pfrom->PushAddress(addr);
     }
 
 
@@ -2998,35 +2991,6 @@ bool SendMessages(CNode* pto, bool fSendTrickle)
             }
             nLastRebroadcast = GetTime();
         }
-
-        // Clear out old addresses periodically so it's not too much work at once
-        static int64 nLastClear;
-        if (nLastClear == 0)
-            nLastClear = GetTime();
-        if (GetTime() - nLastClear > 10 * 60 && vNodes.size() >= 3)
-        {
-            nLastClear = GetTime();
-            CRITICAL_BLOCK(cs_mapAddresses)
-            {
-                CAddrDB addrdb;
-                int64 nSince = GetAdjustedTime() - 14 * 24 * 60 * 60;
-                for (map<vector<unsigned char>, CAddress>::iterator mi = mapAddresses.begin();
-                     mi != mapAddresses.end();)
-                {
-                    const CAddress& addr = (*mi).second;
-                    if (addr.nTime < nSince)
-                    {
-                        if (mapAddresses.size() < 1000 || GetTime() > nLastClear + 20)
-                            break;
-                        addrdb.EraseAddress(addr);
-                        mapAddresses.erase(mi++);
-                    }
-                    else
-                        mi++;
-                }
-            }
-        }
-
 
         //
         // Message: addr

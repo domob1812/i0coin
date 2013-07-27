@@ -46,6 +46,7 @@ OBJS= \
     obj/auxwork,o \
     obj/checkpoints.o \
     obj/netbase.o \
+    obj/addrman.o \
     obj/crypter.o \
     obj/key.o \
     obj/db.o \
