@@ -1458,11 +1458,22 @@ bool CBlock::ConnectBlock(CTxDB& txdb, CBlockIndex* pindex, bool fJustCheck)
     // See BIP30 and http://r6.ca/blog/20120206T005236Z.html for more information.
     // This logic is not necessary for memory pool transactions, as AcceptToMemoryPool
     // already refuses previously-known transaction ids entirely.
-    // This rule applies to all blocks whose timestamp is after March 15, 2012, 0:00 UTC.
+    //
+    // This rule applies to all Bitcoin blocks whose timestamp is after March 15, 2012, 0:00 UTC.
     //
     // When should this happen in i0coin? Not yet...
     int64 nBIP30SwitchTime = 0x7fffffffffffffffLL;
     bool fEnforceBIP30 = (pindex->nTime > nBIP30SwitchTime);
+
+    // after BIP30 is enabled for some time, we could make the same change
+    // as Bitcoin, namely the one suggested below
+    // This rule was originally applied all blocks whose timestamp was after March 15, 2012, 0:00 UTC.
+    // Now that the whole chain is irreversibly beyond that time it is applied to all blocks except the
+    // two in the chain that violate it. This prevents exploiting the issue against nodes in their
+    // initial block download.
+//    bool fEnforceBIP30 = !((pindex->nHeight==91842 && pindex->GetBlockHash() == uint256("0x00000000000a4d0a398161ffc163c503763b1f4360639393e0e4c8e300e0caec")) ||
+//                           (pindex->nHeight==91880 && pindex->GetBlockHash() == uint256("0x00000000000743f190a18c5577a3c2d2a1f610ae9601ac046a38084ccb7cd721")));
+
 
     // when will BIP16 be active in I0C? I have no clue. Set it to INT64_MAX for now.
     int64 nBIP16SwitchTime = 0x7fffffffffffffffLL; //from Bitcoin: 1333238400;
