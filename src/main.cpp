@@ -1458,7 +1458,9 @@ bool CBlock::ConnectBlock(CTxDB& txdb, CBlockIndex* pindex, bool fJustCheck)
     // This logic is not necessary for memory pool transactions, as AcceptToMemoryPool
     // already refuses previously-known transaction ids entirely.
     // This rule applies to all blocks whose timestamp is after March 15, 2012, 0:00 UTC.
-    int64 nBIP30SwitchTime = 1331769600;
+    //
+    // When should this happen in i0coin? Not yet...
+    int64 nBIP30SwitchTime = 0x7fffffffffffffffLL;
     bool fEnforceBIP30 = (pindex->nTime > nBIP30SwitchTime);
 
     // when will BIP16 be active in I0C? I have no clue. Set it to INT64_MAX for now.
