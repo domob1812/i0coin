@@ -1476,7 +1476,8 @@ bool CBlock::AcceptBlock()
          (nHeight == 136800 && hash != uint256("0000000000c8c592fce349ed8cf7eba3113f3c243c9e1cbe27fb6166cc4ffa00")) &&
          (nHeight == 142900 && hash != uint256("00000000005eb49db6f29a6aae382b7a8e9a109aba42e536e6d74b95aba4dffd")) &&
          (nHeight == 155000 && hash != uint256("0000000000041a6bc4cd419ed90a6bb1dbf8df8a587d162504dba9ae84a4418c")) &&
-         (nHeight == 161000 && hash != uint256("601581f84984f86f5c4d080b2e32bd1c4da4061730fd9bc6b4ce08c65b30c4bd")))
+         (nHeight == 161000 && hash != uint256("601581f84984f86f5c4d080b2e32bd1c4da4061730fd9bc6b4ce08c65b30c4bd")) &&
+	 (nHeight == 367000 && hash != uint256("b619876887c0baac0aca8cef5eea23869bce693b8629fb6b62d8b529cd216586")))
         return error("AcceptBlock() : rejected by checkpoint lockin at %d", nHeight);
 	
     // Write block to history file
