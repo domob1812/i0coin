@@ -35,6 +35,7 @@ namespace Checkpoints
 	( 155000, uint256("0x0000000000041a6bc4cd419ed90a6bb1dbf8df8a587d162504dba9ae84a4418c"))
 	( 161000, uint256("0x601581f84984f86f5c4d080b2e32bd1c4da4061730fd9bc6b4ce08c65b30c4bd"))
 	( 367000, uint256("0xb619876887c0baac0aca8cef5eea23869bce693b8629fb6b62d8b529cd216586"))
+	( 837000, uint256("0x421c7a8246ed2759191beff61c46897c0787779cfd174ba53b01f6e5b5ab6ff1"))
 	;
 
     /* i0coin had not testnet checkblocks, if they even start to exist, they can be added here */
