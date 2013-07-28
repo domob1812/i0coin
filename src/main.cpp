@@ -1366,7 +1366,9 @@ bool CBlock::ConnectBlock(CTxDB& txdb, CBlockIndex* pindex)
     // already refuses previously-known transaction id's entirely.
     // This rule applies to all blocks whose timestamp is after March 15, 2012, 0:00 UTC.
     // On testnet it is enabled as of februari 20, 2012, 0:00 UTC.
-    if (pindex->nTime > 1331769600 || (fTestNet && pindex->nTime > 1329696000))
+    //
+    // When should this happen in i0coin? Not yet...
+    if (pindex->nTime > 0x7fffffffffffffff)
         BOOST_FOREACH(CTransaction& tx, vtx)
         {
             CTxIndex txindexOld;
