@@ -135,7 +135,7 @@ bool AppInit(int argc, char* argv[])
         if (mapArgs.count("-?") || mapArgs.count("--help"))
         {
             // First part of help message is specific to bitcoind / RPC client
-            std::string strUsage = _("Bitcoin version") + " " + FormatFullVersion() + "\n\n" +
+            std::string strUsage = _("I0coin version") + " " + FormatFullVersion() + "\n\n" +
                 _("Usage:") + "\n" +
                   "  bitcoind [options]                     " + "\n" +
                   "  bitcoind [options] <command> [params]  " + _("Send command to -server or bitcoind") + "\n" +
@@ -190,13 +190,13 @@ int main(int argc, char* argv[])
 
 bool static InitError(const std::string &str)
 {
-    uiInterface.ThreadSafeMessageBox(str, _("Bitcoin"), CClientUIInterface::OK | CClientUIInterface::MODAL);
+    uiInterface.ThreadSafeMessageBox(str, _("I0coin"), CClientUIInterface::OK | CClientUIInterface::MODAL);
     return false;
 }
 
 bool static InitWarning(const std::string &str)
 {
-    uiInterface.ThreadSafeMessageBox(str, _("Bitcoin"), CClientUIInterface::OK | CClientUIInterface::ICON_EXCLAMATION | CClientUIInterface::MODAL);
+    uiInterface.ThreadSafeMessageBox(str, _("I0coin"), CClientUIInterface::OK | CClientUIInterface::ICON_EXCLAMATION | CClientUIInterface::MODAL);
     return true;
 }
 
@@ -475,7 +475,7 @@ bool AppInit2()
     std::ostringstream strErrors;
 
     if (fDaemon)
-        fprintf(stdout, "Bitcoin server starting\n");
+        fprintf(stdout, "I0coin server starting\n");
 
     int64 nStart;
 

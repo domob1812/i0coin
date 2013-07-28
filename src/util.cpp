@@ -1210,7 +1210,7 @@ void AddTimeData(const CNetAddr& ip, int64 nTime)
                     string strMessage = _("Warning: Please check that your computer's date and time are correct! If your clock is wrong I0coin will not work properly.");
                     strMiscWarning = strMessage;
                     printf("*** %s\n", strMessage.c_str());
-                    uiInterface.ThreadSafeMessageBox(strMessage+" ", string("Bitcoin"), CClientUIInterface::OK | CClientUIInterface::ICON_EXCLAMATION);
+                    uiInterface.ThreadSafeMessageBox(strMessage+" ", string("I0coin"), CClientUIInterface::OK | CClientUIInterface::ICON_EXCLAMATION);
                 }
             }
         }
