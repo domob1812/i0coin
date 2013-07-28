@@ -1907,7 +1907,7 @@ bool CBlock::CheckBlock(int nHeight, bool fCheckPOW, bool fCheckMerkleRoot) cons
         return DoS(100, error("CheckBlock() : size limits failed"));
 
     // Check proof of work matches claimed amount
-    if (fCheckPOW && !::CheckProofOfWork(GetHash(), nBits))
+    if (fCheckPOW && !CheckProofOfWork(nHeight))
         return DoS(50, error("CheckBlock() : proof of work failed"));
 
     // Check timestamp
