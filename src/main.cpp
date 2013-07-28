@@ -1376,8 +1376,8 @@ bool CBlock::ConnectBlock(CTxDB& txdb, CBlockIndex* pindex)
                         return false;
         }
 
-    // BIP16 didn't become active until Apr 1 2012 (Feb 15 on testnet)
-    int64 nBIP16SwitchTime = fTestNet ? 1329264000 : 1333238400;
+    // when will BIP16 be active in I0C? I have no clue. Set it to INT64_MAX for now.
+    int64 nBIP16SwitchTime = 0x7fffffffffffffffLL; //from Bitcoin: fTestNet ? 1329264000 : 1333238400;
     bool fStrictPayToScriptHash = (pindex->nTime >= nBIP16SwitchTime);
 
     //// issue here: it doesn't know the version
