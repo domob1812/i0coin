@@ -594,6 +594,8 @@ Value getauxblock(const Array& params, bool fHelp)
 
             // Create new block with nonce = 0 and extraNonce = 1
             pblocktemplate = CreateNewBlock(reservekey);
+            if (!pblocktemplate)
+                throw JSONRPCError(-7, "Out of memory");
 
 	    pblock = &pblocktemplate->block;
             // Update nTime
@@ -610,8 +612,6 @@ Value getauxblock(const Array& params, bool fHelp)
             // Save
             mapNewBlock[pblock->GetHash()] = pblock;
 
-            if (!pblocktemplate)
-                throw JSONRPCError(-7, "Out of memory");
             vNewBlockTemplate.push_back(pblocktemplate);
         }
 
