@@ -2817,6 +2817,18 @@ bool VerifyDB() {
     return true;
 }
 
+void UnloadBlockIndex()
+{
+    mapBlockIndex.clear();
+    setBlockIndexValid.clear();
+    pindexGenesisBlock = NULL;
+    nBestHeight = 0;
+    bnBestChainWork = 0;
+    bnBestInvalidWork = 0;
+    hashBestChain = 0;
+    pindexBest = NULL;
+}
+
 bool LoadBlockIndex()
 {
     if (fTestNet)
