@@ -22,7 +22,7 @@ public:
     std::vector<uint256> vChainMerkleBranch;
     // Index of chain in chains merkle tree
     unsigned int nChainIndex;
-    CBlock parentBlock;
+    CBlockHeader parentBlockHeader;
 
     IMPLEMENT_SERIALIZE
     (
@@ -33,14 +33,14 @@ public:
 
         // Always serialize the saved parent block as header so that the size of CAuxPow
         // is consistent.
-        nSerSize += SerReadWrite(s, parentBlock, nType, nVersion, ser_action);
+        nSerSize += SerReadWrite(s, parentBlockHeader, nType, nVersion, ser_action);
     )
 
     bool Check(uint256 hashAuxBlock, int nChainID);
 
     uint256 GetParentBlockHash()
     {
-        return parentBlock.GetHash();
+        return parentBlockHeader.GetHash();
     }
 };
 

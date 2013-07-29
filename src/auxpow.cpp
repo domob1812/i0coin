@@ -22,7 +22,7 @@ bool CAuxPow::Check(uint256 hashAuxBlock, int nChainID)
     if (nIndex != 0)
         return error("AuxPow is not a generate");
 
-    if (!fTestNet && parentBlock.GetChainID() == nChainID)
+    if (!fTestNet && parentBlockHeader.GetChainID() == nChainID)
         return error("Aux POW parent has our chain ID");
 
     if (vChainMerkleBranch.size() > 30)
@@ -34,7 +34,7 @@ bool CAuxPow::Check(uint256 hashAuxBlock, int nChainID)
     std::reverse(vchRootHash.begin(), vchRootHash.end()); // correct endian
 
     // Check that we are in the parent block merkle tree
-    if (CBlock::CheckMerkleBranch(GetHash(), vMerkleBranch, nIndex) != parentBlock.hashMerkleRoot)
+    if (CBlock::CheckMerkleBranch(GetHash(), vMerkleBranch, nIndex) != parentBlockHeader.hashMerkleRoot)
         return error("Aux POW merkle root incorrect");
 
     const CScript script = vin[0].scriptSig;
