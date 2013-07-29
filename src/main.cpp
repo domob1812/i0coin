@@ -1997,7 +1997,7 @@ bool CBlock::AcceptBlock()
         return DoS(100, error("AcceptBlock() : rejected by checkpoint lock-in at %d", nHeight));
 
     // Reject block.nVersion=1 blocks when 95% (75% on testnet) of the network has upgraded:
-    if (nVersion < 2)
+    if ((nVersion&0xff) < 2)
     {
         if ((!fTestNet && CBlockIndex::IsSuperMajority(2, pindexPrev, 950, 1000)) ||
             (fTestNet && CBlockIndex::IsSuperMajority(2, pindexPrev, 75, 100)))
@@ -2006,7 +2006,7 @@ bool CBlock::AcceptBlock()
         }
     }
     // Enforce block.nVersion=2 rule that the coinbase starts with serialized block height
-    if (nVersion >= 2)
+    if ((nVersion&0xff) >= 2)
     {
         // if 750 of the last 1,000 blocks are version 2 or greater (51/100 if testnet):
         if ((!fTestNet && CBlockIndex::IsSuperMajority(2, pindexPrev, 750, 1000)) ||
@@ -2046,7 +2046,7 @@ bool CBlockIndex::IsSuperMajority(int minVersion, const CBlockIndex* pstart, uns
     unsigned int nFound = 0;
     for (unsigned int i = 0; i < nToCheck && nFound < nRequired && pstart != NULL; i++)
     {
-        if (pstart->nVersion >= minVersion)
+        if ((pstart->nVersion&0xff) >= minVersion)
             ++nFound;
         pstart = pstart->pprev;
     }
