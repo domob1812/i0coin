@@ -4875,7 +4875,7 @@ std::string CBlockIndex::ToString() const
     return strprintf("CBlockIndex(pprev=%p, pnext=%p, nHeight=%d, merkle=%s, hashBlock=%s, hashParentBlock=%s)",
             pprev, pnext, nHeight,
             hashMerkleRoot.ToString().substr(0,10).c_str(),
-            BlockHashStr(GetBlockHash()).c_str(),
+            GetBlockHash().ToString().c_str(),
             (auxpow.get() != NULL) ? auxpow->GetParentBlockHash().ToString().substr(0,20).c_str() : "-");
 }
 
