@@ -522,7 +522,7 @@ Value getworkaux(const Array& params, bool fHelp)
 
             pow.SetMerkleBranch(pblock);
             pow.nChainIndex = nChainIndex;
-            pow.parentBlock = *pblock;
+            pow.parentBlockHeader = *pblock;
             CDataStream ss(SER_GETHASH, PROTOCOL_VERSION);
             ss << pow;
             Object result;
