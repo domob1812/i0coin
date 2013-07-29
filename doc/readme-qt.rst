@@ -8,13 +8,25 @@ Debian
 -------
 
 First, make sure that the required packages for Qt4 development of your
-distribution are installed, for Debian and Ubuntu these are:
+distribution are installed, these are
+
+::
+
+for Debian and Ubuntu  <= 11.10 :
 
 ::
 
     apt-get install qt4-qmake libqt4-dev build-essential libboost-dev libboost-system-dev \
         libboost-filesystem-dev libboost-program-options-dev libboost-thread-dev \
         libssl-dev libdb4.8++-dev
+
+for Ubuntu >= 12.04 (please read the 'Berkely DB version warning' below):
+
+::
+
+    apt-get install qt4-qmake libqt4-dev build-essential libboost-dev libboost-system-dev \
+        libboost-filesystem-dev libboost-program-options-dev libboost-thread-dev \
+        libssl-dev libdb++-dev libminiupnpc-dev
 
 then execute the following:
 
@@ -27,7 +39,7 @@ Alternatively, install `Qt Creator`_ and open the `bitcoin-qt.pro` file.
 
 An executable named `bitcoin-qt` will be built.
 
-.. _`Qt Creator`: http://qt.nokia.com/downloads/
+.. _`Qt Creator`: http://qt-project.org/downloads/
 
 Windows
 --------
@@ -42,7 +54,7 @@ Windows build instructions:
 
 - Open the bitcoin-qt.pro file in Qt Creator and build as normal (ctrl-B)
 
-.. _`Qt Windows SDK`: http://qt.nokia.com/downloads/sdk-windows-cpp
+.. _`Qt Windows SDK`: http://qt-project.org/downloads/
 .. _`dependencies archive`: https://download.visucore.com/bitcoin/qtgui_deps_1.zip
 .. [#] PGP signature: https://download.visucore.com/bitcoin/qtgui_deps_1.zip.sig (signed with RSA key ID `610945D0`_)
 .. _`610945D0`: http://pgp.mit.edu:11371/pks/lookup?op=get&search=0x610945D0
@@ -64,7 +76,7 @@ Mac OS X
 
 - Open the bitcoin-qt.pro file in Qt Creator and build as normal (cmd-B)
 
-.. _`Qt Mac OS X SDK`: http://qt.nokia.com/downloads/sdk-mac-os-cpp
+.. _`Qt Mac OS X SDK`: http://qt-project.org/downloads/
 .. _`MacPorts`: http://www.macports.org/install.php
 
 
@@ -108,8 +120,8 @@ FreeDesktop notification interface through DBUS using the following qmake option
 Generation of QR codes
 -----------------------
 
-libqrencode may be used to generate QRCode images for payment requests. 
-It can be downloaded from http://fukuchi.org/works/qrencode/index.html.en, or installed via your package manager. Pass the USE_QRCODE 
+libqrencode may be used to generate QRCode images for payment requests.
+It can be downloaded from http://fukuchi.org/works/qrencode/index.html.en, or installed via your package manager. Pass the USE_QRCODE
 flag to qmake to control this:
 
 +--------------+--------------------------------------------------------------------------+

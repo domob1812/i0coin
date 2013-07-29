@@ -33,7 +33,7 @@ public:
 
         // Always serialize the saved parent block as header so that the size of CAuxPow
         // is consistent.
-        nSerSize += SerReadWrite(s, parentBlock, nType | SER_BLOCKHEADERONLY, nVersion, ser_action);
+        nSerSize += SerReadWrite(s, parentBlock, nType, nVersion, ser_action);
     )
 
     bool Check(uint256 hashAuxBlock, int nChainID);

@@ -1,5 +1,5 @@
-#ifndef BITCOINFIELD_H
-#define BITCOINFIELD_H
+#ifndef BITCOINAMOUNTFIELD_H
+#define BITCOINAMOUNTFIELD_H
 
 #include <QWidget>
 
@@ -31,7 +31,7 @@ public:
     /** Make field empty and ready for new input. */
     void clear();
 
-    /** Qt messes up the tab chain by default in some cases (issue http://bugreports.qt.nokia.com/browse/QTBUG-10907),
+    /** Qt messes up the tab chain by default in some cases (issue https://bugreports.qt-project.org/browse/QTBUG-10907),
         in these cases we have to set it up manually.
     */
     QWidget *setupTabChain(QWidget *prev);
@@ -57,4 +57,4 @@ private slots:
 };
 
 
-#endif // BITCOINFIELD_H
+#endif // BITCOINAMOUNTFIELD_H
