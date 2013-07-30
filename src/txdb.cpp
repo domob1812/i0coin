@@ -79,6 +79,10 @@ bool CBlockTreeDB::WriteBlockIndex(const CBlockIndex& blockindex)
     return Write(boost::tuples::make_tuple('b', blockindex.GetBlockHash(), 'b'), blockindex);
 }
 
+bool CBlockTreeDB::ReadDiskBlockIndex(const uint256 &blkid, CDiskBlockIndex &diskblockindex) {
+    return Read(boost::tuples::make_tuple('b', blkid, 'a'), diskblockindex);
+}
+
 bool CBlockTreeDB::ReadBestInvalidWork(CBigNum& bnBestInvalidWork)
 {
     return Read('I', bnBestInvalidWork);
