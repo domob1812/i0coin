@@ -34,7 +34,8 @@ private:
     CBlockTreeDB(const CBlockTreeDB&);
     void operator=(const CBlockTreeDB&);
 public:
-    bool WriteBlockIndex(const CDiskBlockIndex& blockindex);
+    bool WriteDiskBlockIndex(const CDiskBlockIndex& diskblockindex);
+    bool WriteBlockIndex(const CBlockIndex& blockindex);
     bool ReadBestInvalidWork(CBigNum& bnBestInvalidWork);
     bool WriteBestInvalidWork(const CBigNum& bnBestInvalidWork);
     bool ReadBlockFileInfo(int nFile, CBlockFileInfo &fileinfo);
