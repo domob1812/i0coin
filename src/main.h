@@ -1644,6 +1644,18 @@ enum BlockStatus {
  * to it, but pnext will only point forward to the longest branch, or will
  * be null if the block is not part of the longest chain.
  */
+/* a lot of the info inhere can't change, we store the mutable and immutable
+ * data in different places of the DB. This has two consequences:
+ * 1. updating mutable data is more efficient
+ *    (as immutable data doesn't have to be rewritten time and again)
+ * 2. less used immutable data doesn't need to be in memory just
+ *    to be able to update the mutable data, which allows for memory efficient
+ *    caching strategies
+ *
+ * Note: nFile and nDataPos are in the current implementation immutable,
+ *       however, the parsing of those fields is dependent on nStatus
+ *       which is mutable. To stay on the safe side, I think it is best to
+ *       assume the worst. */
 class CBlockIndex
 {
 public:
@@ -1657,36 +1669,36 @@ public:
     CBlockIndex* pnext;
 
     // height of the entry in the chain. The genesis block has height 0
-    int nHeight;
+    int nHeight;                                                    /* immutable */
 
     // Which # file this block is stored in (blk?????.dat)
-    int nFile;
+    int nFile;                                                      /* mutable */
 
     // Byte offset within blk?????.dat where this block's data is stored
-    unsigned int nDataPos;
+    unsigned int nDataPos;                                          /* mutable */
 
     // Byte offset within rev?????.dat where this block's undo data is stored
-    unsigned int nUndoPos;
+    unsigned int nUndoPos;                                          /* mutable */
 
     // (memory only) Total amount of work (expected number of hashes) in the chain up to and including this block
     uint256 nChainWork;
 
     // Number of transactions in this block.
     // Note: in a potential headers-first mode, this number cannot be relied upon
-    unsigned int nTx;
+    unsigned int nTx;                                               /* immutable */
 
     // (memory only) Number of transactions in the chain up to and including this block
     unsigned int nChainTx; // change to 64-bit type when necessary; won't happen before 2030
 
     // Verification status of this block. See enum BlockStatus
-    unsigned int nStatus;
+    unsigned int nStatus;                                           /* mutable */
 
     // block header
-    int nVersion;
-    uint256 hashMerkleRoot;
-    unsigned int nTime;
-    unsigned int nBits;
-    unsigned int nNonce;
+    int nVersion;                                                   /* immutable */
+    uint256 hashMerkleRoot;                                         /* immutable */
+    unsigned int nTime;                                             /* immutable */
+    unsigned int nBits;                                             /* immutable */
+    unsigned int nNonce;                                            /* immutable */
 
     // if this is an aux work block
     boost::shared_ptr<CAuxPow> auxpow;
@@ -1734,6 +1746,22 @@ public:
         nNonce         = block.nNonce;
         auxpow         = block.auxpow;
     }
+
+    IMPLEMENT_SERIALIZE
+    (
+        /* mutable stuff goes here, immutable stuff
+         * has SERIALIZE functions in CDiskBlockIndex */
+        if (!(nType & SER_GETHASH))
+            READWRITE(VARINT(nVersion));
+
+        READWRITE(VARINT(nStatus));
+        if (nStatus & (BLOCK_HAVE_DATA | BLOCK_HAVE_UNDO))
+            READWRITE(VARINT(nFile));
+        if (nStatus & BLOCK_HAVE_DATA)
+            READWRITE(VARINT(nDataPos));
+        if (nStatus & BLOCK_HAVE_UNDO)
+            READWRITE(VARINT(nUndoPos));
+    )
 
     CDiskBlockPos GetBlockPos() const {
         CDiskBlockPos ret;
@@ -1867,18 +1895,13 @@ public:
 
     IMPLEMENT_SERIALIZE
     (
+        /* immutable stuff goes here, mutable stuff
+         * has SERIALIZE functions in CDiskBlockIndex */
         if (!(nType & SER_GETHASH))
             READWRITE(VARINT(nVersion));
 
         READWRITE(VARINT(nHeight));
-        READWRITE(VARINT(nStatus));
         READWRITE(VARINT(nTx));
-        if (nStatus & (BLOCK_HAVE_DATA | BLOCK_HAVE_UNDO))
-            READWRITE(VARINT(nFile));
-        if (nStatus & BLOCK_HAVE_DATA)
-            READWRITE(VARINT(nDataPos));
-        if (nStatus & BLOCK_HAVE_UNDO)
-            READWRITE(VARINT(nUndoPos));
 
         // block header
         READWRITE(this->nVersion);
@@ -1890,7 +1913,7 @@ public:
         ReadWriteAuxPow(s, auxpow, nType, this->nVersion, ser_action);
     )
 
-    uint256 GetBlockHash() const
+    uint256 CalcBlockHash() const
     {
         CBlockHeader block;
         block.nVersion        = nVersion;
