@@ -2057,7 +2057,7 @@ bool CBlock::AddToBlockIndex(CValidationState &state, const CDiskBlockPos &pos)
     setBlockIndexValid.insert(pindexNew);
 
     /* write both the immutable data (CDiskBlockIndex) and the mutable data (BlockIndex) */
-    if (!pblocktree->WriteDiskBlockIndex(CDiskBlockIndex(pindexNew)) || !pblocktree->WriteBlockIndex(*pindexNew))
+    if (!pblocktree->WriteDiskBlockIndex(CDiskBlockIndex(pindexNew, this->auxpow)) || !pblocktree->WriteBlockIndex(*pindexNew))
         return state.Abort(_("Failed to write block index"));
 
     // New best?
@@ -4864,7 +4864,7 @@ void GenerateBitcoins(bool fGenerate, CWallet* pwallet)
         minerThreads->create_thread(boost::bind(&BitcoinMiner, pwallet));
 }
 
-bool CBlockIndex::CheckIndex() const
+bool CDiskBlockIndex::CheckIndex() const
 {
     if (nVersion & BLOCK_VERSION_AUXPOW)
         return CheckProofOfWork(auxpow->GetParentBlockHash(), nBits);
@@ -4874,13 +4874,45 @@ bool CBlockIndex::CheckIndex() const
 
 std::string CBlockIndex::ToString() const
 {
-    return strprintf("CBlockIndex(pprev=%p, pnext=%p, nHeight=%d, merkle=%s, hashBlock=%s, hashParentBlock=%s)",
+    return strprintf("CBlockIndex(pprev=%p, pnext=%p, nHeight=%d, merkle=%s, hashBlock=%s)",
             pprev, pnext, nHeight,
             hashMerkleRoot.ToString().substr(0,10).c_str(),
-            GetBlockHash().ToString().c_str(),
-            (auxpow.get() != NULL) ? auxpow->GetParentBlockHash().ToString().substr(0,20).c_str() : "-");
+            GetBlockHash().ToString().c_str());
 }
 
+std::string CDiskBlockIndex::ToString() const
+{
+    std::string str = "CDiskBlockIndex(";
+    str += CBlockIndex::ToString();
+    str += strprintf("\n                hashBlock=%s, hashPrev=%s, hashParentBlock=%s)",
+        GetBlockHash().ToString().c_str(),
+        hashPrev.ToString().c_str(),
+        (auxpow.get() != NULL) ? auxpow->GetParentBlockHash().ToString().substr(0,20).c_str() : "-");
+    return str;
+}         
+
+CBlockHeader CBlockIndex::GetBlockHeader() const
+{
+    CBlockHeader block;
+  
+    if (nVersion & BLOCK_VERSION_AUXPOW) {
+        CDiskBlockIndex diskblockindex;
+        // auxpow is not in memory, load CDiskBlockHeader
+        // from database to get it
+  
+        pblocktree->ReadDiskBlockIndex(*phashBlock, diskblockindex);
+        block.auxpow = diskblockindex.auxpow;
+    }
+
+    block.nVersion       = nVersion;
+    if (pprev)
+        block.hashPrevBlock = pprev->GetBlockHash();
+    block.hashMerkleRoot = hashMerkleRoot;
+    block.nTime          = nTime;
+    block.nBits          = nBits;
+    block.nNonce         = nNonce;
+    return block;
+}
 
 // Amount compression:
 // * If the amount is 0, output 0

@@ -1700,9 +1700,6 @@ public:
     unsigned int nBits;                                             /* immutable */
     unsigned int nNonce;                                            /* immutable */
 
-    // if this is an aux work block
-    boost::shared_ptr<CAuxPow> auxpow;
- 
     CBlockIndex()
     {
         phashBlock = NULL;
@@ -1722,7 +1719,6 @@ public:
         nTime          = 0;
         nBits          = 0;
         nNonce         = 0;
-        auxpow.reset();
     }
 
     CBlockIndex(CBlockHeader& block)
@@ -1744,7 +1740,6 @@ public:
         nTime          = block.nTime;
         nBits          = block.nBits;
         nNonce         = block.nNonce;
-        auxpow         = block.auxpow;
     }
 
     IMPLEMENT_SERIALIZE
@@ -1781,19 +1776,7 @@ public:
         return ret;
     }
 
-    CBlockHeader GetBlockHeader() const
-    {
-        CBlockHeader block;
-        block.nVersion       = nVersion;
-        if (pprev)
-            block.hashPrevBlock = pprev->GetBlockHash();
-        block.hashMerkleRoot = hashMerkleRoot;
-        block.nTime          = nTime;
-        block.nBits          = nBits;
-        block.nNonce         = nNonce;
-        block.auxpow         = auxpow;
-        return block;
-    }
+    CBlockHeader GetBlockHeader() const;
 
     uint256 GetBlockHash() const
     {
@@ -1818,8 +1801,6 @@ public:
     {
         return (pnext || this == pindexBest);
     }
-
-    bool CheckIndex() const;
 
     enum { nMedianTimeSpan=11 };
 
@@ -1885,12 +1866,17 @@ class CDiskBlockIndex : public CBlockIndex
 public:
     uint256 hashPrev;
 
+    // if this is an aux work block
+    boost::shared_ptr<CAuxPow> auxpow;
+
     CDiskBlockIndex() {
         hashPrev = 0;
+        auxpow.reset();
     }
 
-    explicit CDiskBlockIndex(CBlockIndex* pindex) : CBlockIndex(*pindex) {
+    explicit CDiskBlockIndex(CBlockIndex* pindex, boost::shared_ptr<CAuxPow> auxpow) : CBlockIndex(*pindex) {
         hashPrev = (pprev ? pprev->GetBlockHash() : 0);
+        this->auxpow = auxpow;
     }
 
     IMPLEMENT_SERIALIZE
@@ -1925,16 +1911,9 @@ public:
         return block.GetHash();
     }
 
+    bool CheckIndex() const;
 
-    std::string ToString() const
-    {
-        std::string str = "CDiskBlockIndex(";
-        str += CBlockIndex::ToString();
-        str += strprintf("\n                hashBlock=%s, hashPrev=%s)",
-            GetBlockHash().ToString().c_str(),
-            hashPrev.ToString().c_str());
-        return str;
-    }
+    std::string ToString() const;
 
     void print() const
     {
