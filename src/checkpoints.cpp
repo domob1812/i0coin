@@ -48,6 +48,7 @@ namespace Checkpoints
 	( 161000, uint256("0x601581f84984f86f5c4d080b2e32bd1c4da4061730fd9bc6b4ce08c65b30c4bd"))
 	( 367000, uint256("0xb619876887c0baac0aca8cef5eea23869bce693b8629fb6b62d8b529cd216586"))
 	( 837000, uint256("0x421c7a8246ed2759191beff61c46897c0787779cfd174ba53b01f6e5b5ab6ff1"))
+    ( 850000, uint256("0x23a601419f21ef1a261bf2a4b0fc6582b8907f33d0c0e23e9c3ff9d169752c94"))
 	;
 
     /* i0coin had not testnet checkblocks, if they even start to exist, they can be added here */
@@ -58,10 +59,10 @@ namespace Checkpoints
         ;
     static const CCheckpointData data = {
         &mapCheckpoints,
-        1363044259, // * UNIX timestamp of last checkpoint block
-        14264869,   // * total number of transactions between genesis and last checkpoint
+        1375749122, // * UNIX timestamp of last checkpoint block
+        936858,     // * total number of transactions between genesis and last checkpoint
                     //   (the tx=... number in the SetBestChain debug.log lines)
-        60000.0     // * estimated number of transactions per day after checkpoint
+        1000.0      // * estimated number of transactions per day after checkpoint
     };
 
     static const CCheckpointData dataTestnet = {
