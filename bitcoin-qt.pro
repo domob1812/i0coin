@@ -1,5 +1,5 @@
 TEMPLATE = app
-TARGET = bitcoin-qt
+TARGET = i0coin-qt
 macx:TARGET = "I0coin-Qt"
 VERSION = 0.8.3
 INCLUDEPATH += src src/json src/qt
@@ -142,6 +142,7 @@ HEADERS += src/qt/bitcoingui.h \
     src/qt/aboutdialog.h \
     src/qt/editaddressdialog.h \
     src/qt/bitcoinaddressvalidator.h \
+    src/auxpow.h \
     src/alert.h \
     src/addrman.h \
     src/base58.h \
@@ -224,6 +225,7 @@ SOURCES += src/qt/bitcoin.cpp \
     src/qt/aboutdialog.cpp \
     src/qt/editaddressdialog.cpp \
     src/qt/bitcoinaddressvalidator.cpp \
+    src/auxpow.cpp \
     src/alert.cpp \
     src/version.cpp \
     src/sync.cpp \
@@ -307,7 +309,7 @@ SOURCES += src/qt/test/test_main.cpp \
 HEADERS += src/qt/test/uritests.h
 DEPENDPATH += src/qt/test
 QT += testlib
-TARGET = bitcoin-qt_test
+TARGET = i0coin-qt_test
 DEFINES += BITCOIN_QT_TEST
   macx: CONFIG -= app_bundle
 }

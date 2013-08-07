@@ -15,11 +15,13 @@ src/test_i0coin
 *.qm
 Makefile
 bitcoin-qt
+i0coin-qt
 Bitcoin-Qt.app
 
 # Unit-tests
 Makefile.test
 bitcoin-qt_test
+i0couin-qt_test
 
 # Resources cpp
 qrc_*.cpp

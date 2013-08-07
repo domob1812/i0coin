@@ -1290,6 +1290,11 @@ bool CheckProofOfWork(uint256 hash, unsigned int nBits)
     return true;
 }
 
+int GetNumBlocksOfPeers()
+{
+    return std::max(cPeerBlockCounts.median(), Checkpoints::GetTotalBlocksEstimate());
+}
+
 bool IsInitialBlockDownload()
 {
     if (pindexBest == NULL || fImporting || fReindex || nBestHeight < Checkpoints::GetTotalBlocksEstimate())
