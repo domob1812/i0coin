@@ -6,15 +6,15 @@ SetCompressor /SOLID lzma
 # General Symbol Definitions
 !define REGKEY "SOFTWARE\$(^Name)"
 !define VERSION 0.8.3-1
-!define COMPANY "Bitcoin project"
-!define URL http://www.bitcoin.org/
+!define COMPANY "I0coin project"
+!define URL http://i0coin.snel.it/
 
 # MUI Symbol Definitions
-!define MUI_ICON "../share/pixmaps/bitcoin.ico"
-!define MUI_WELCOMEFINISHPAGE_BITMAP "../share/pixmaps/nsis-wizard.bmp"
+!define MUI_ICON "../share/pixmaps/i0coin.ico"
+!define MUI_WELCOMEFINISHPAGE_BITMAP "../share/pixmaps/nsis-wizard-i0c.bmp"
 !define MUI_HEADERIMAGE
 !define MUI_HEADERIMAGE_RIGHT
-!define MUI_HEADERIMAGE_BITMAP "../share/pixmaps/nsis-header.bmp"
+!define MUI_HEADERIMAGE_BITMAP "../share/pixmaps/nsis-header-i0c.bmp"
 !define MUI_FINISHPAGE_NOAUTOCLOSE
 !define MUI_STARTMENUPAGE_REGISTRY_ROOT HKLM
 !define MUI_STARTMENUPAGE_REGISTRY_KEY ${REGKEY}
@@ -22,7 +22,7 @@ SetCompressor /SOLID lzma
 !define MUI_STARTMENUPAGE_DEFAULTFOLDER I0coin
 !define MUI_FINISHPAGE_RUN $INSTDIR\i0coin-qt.exe
 !define MUI_UNICON "${NSISDIR}\Contrib\Graphics\Icons\modern-uninstall.ico"
-!define MUI_UNWELCOMEFINISHPAGE_BITMAP "../share/pixmaps/nsis-wizard.bmp"
+!define MUI_UNWELCOMEFINISHPAGE_BITMAP "../share/pixmaps/nsis-wizard-i0c.bmp"
 !define MUI_UNFINISHPAGE_NOAUTOCLOSE
 
 # Included files
