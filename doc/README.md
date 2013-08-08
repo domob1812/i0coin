@@ -1,7 +1,7 @@
-Bitcoin 0.8.3 BETA
+I0coin 0.8.3-1 BETA
 ====================
 
-Copyright (c) 2009-2013 Bitcoin Developers
+Copyright (c) 2009-2013 Bitcoin and I0coin Developers
 
 Distributed under the MIT/X11 software license, see the accompanying
 file COPYING or http://www.opensource.org/licenses/mit-license.php.

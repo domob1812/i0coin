@@ -4,11 +4,11 @@
 
 DEPSDIR:=/usr/i586-mingw32msvc
 
-CC := i686-w64-mingw32-gcc
-CXX := i686-w64-mingw32-g++
+CC := i586-mingw32msvc-gcc
+CXX := i586-mingw32msvc-g++
 
 USE_UPNP:=0
-USE_IPV6:=-
+USE_IPV6:=1
 
 INCLUDEPATHS= \
  -I"$(CURDIR)" \
@@ -25,11 +25,11 @@ LIBPATHS= \
 
 LIBS= \
   $(CURDIR)/leveldb/libleveldb.a $(CURDIR)/leveldb/libmemenv.a \
- -l boost_system-mt \
- -l boost_filesystem-mt \
- -l boost_program_options-mt \
- -l boost_thread_win32-mt \
- -l boost_chrono-mt \
+ -l boost_system-mt-s \
+ -l boost_filesystem-mt-s \
+ -l boost_program_options-mt-s \
+ -l boost_thread_win32-mt-s \
+ -l boost_chrono-mt-s \
  -l db_cxx \
  -l ssl \
  -l crypto

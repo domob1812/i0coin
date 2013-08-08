@@ -35,4 +35,8 @@ signers:
     weight: 40
     name: "Wladimir J. van der Laan"
     key: laanwj
+  6C819E6DC784FC67B9ECD607C82E8484DE9FC2B3:
+    weight: 40
+    name: "Rik Snel"
+    key: rsnel
 minimum_weight: 120
