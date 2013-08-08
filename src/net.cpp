@@ -1246,9 +1246,9 @@ void ThreadDNSAddressSeed()
 // IP address encoded in unsigned int, port is default port (7333)
 unsigned int pnSeed[] =
 {
-    0xC69A3C3D, // 198.154.60.61
-    0x5511F8D3, // 85.17.248.211
-    0xBCA5D83B, // 188.165.216.59
+    0x3D3C9AC6, // 198.154.60.61
+    0xD3F81155, // 85.17.248.211
+    0x3BD8A5BC, // 188.165.216.59
 };
 
 void DumpAddresses()
