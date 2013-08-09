@@ -144,7 +144,7 @@ OBJS= \
     obj/leveldb.o \
     obj/txdb.o
 
-all: i0coin
+all: i0coind
 
 
 
