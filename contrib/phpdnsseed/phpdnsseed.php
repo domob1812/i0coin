@@ -70,7 +70,7 @@ shuffle($targets);
 ;
 $TTL	600
 @	IN	SOA <? echo($master.' '.$hostmaster); ?> (
-			<? echo (date("Ymdhis")); ?> ; Serial
+			<? echo (date("YmdHis")); ?> ; Serial
 			28800		; Refresh
 			7200		; Retry
 			2419200		; Expire
