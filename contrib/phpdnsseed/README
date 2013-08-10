@@ -4,6 +4,8 @@ suitable for bind.
 
 Caveat: only IPV4 is supported at this moment.
 
+You should be familiar with bind. I assume you already run it
+and you want to add a subdomain to provide a DNSSeed.
 
 Config hints (replace example.com by your domain...)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

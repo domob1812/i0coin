@@ -9,7 +9,7 @@ $max = 10; // must be > 1, otherwise array_rand does not return an array
 // note the trailing dots, the @ in the hostmaster emailaddress
 // is replaced by a dot
 $master = 'ns1.example.com.';
-$slaves = array ( 'ns2.example.com', 'ns3.example.com' );
+$slaves = array ( 'ns2.example.com.', 'ns3.example.com.' );
 
 $hostmaster = 'hostmaster.example.com.';
 
@@ -61,6 +61,8 @@ if (count($output) > $max) {
 } else {
 	$targets = array_keys($output);
 }
+
+shuffle($targets);
 
 ?>
 ;
