@@ -1,9 +1,10 @@
 #!/usr/bin/php
 <?
 // configuration
-$daemon = '/home/rsnel/src/i0coin/src/i0coind getpeerinfo';
+$daemon = '$HOME/src/i0coin/src/i0coind getpeerinfo';
 $port = 7333;
 $domain = 'i0seed.example.com';
+$max = 10; // must be > 1, otherwise array_rand does not return an array
 
 // note the trailing dots, the @ in the hostmaster emailaddress
 // is replaced by a dot
@@ -53,6 +54,14 @@ if (!count($output)) {
 	exit(1);
 }
 
+assert($max > 1);
+
+if (count($output) > $max) {
+	$targets = array_rand($output, $max);
+} else {
+	$targets = array_keys($output);
+}
+
 ?>
 ;
 ; BIND data for <? echo($domain."\n"); ?>
@@ -68,6 +77,6 @@ $TTL	600
 <? foreach ($slaves as $slave) { ?>
 		NS	<? echo($slave."\n"); ?>
 <? } ?>
-<? foreach ($output as $ip) { ?>
-		A	<? echo($ip."\n") ?>
+<? foreach ($targets as $key) { ?>
+		A	<? echo($output[$key]."\n") ?>
 <? } ?>
