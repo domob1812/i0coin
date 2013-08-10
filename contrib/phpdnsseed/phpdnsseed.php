@@ -3,6 +3,16 @@
 // configuration
 $daemon = '/home/rsnel/src/i0coin/src/i0coind getpeerinfo';
 $port = 7333;
+$domain = 'i0seed.example.com';
+
+// note the trailing dots, the @ in the hostmaster emailaddress
+// is replaced by a dot
+$master = 'ns1.example.com.';
+$slaves = array ( 'ns2.example.com', 'ns3.example.com' );
+
+$hostmaster = 'hostmaster.example.com.';
+
+// end config section
 
 $ret = `$daemon`;
 if ($ret == '') { // we got no output, not even an empty array...
@@ -45,17 +55,19 @@ if (!count($output)) {
 
 ?>
 ;
-; BIND data for i0seed.snel.it
+; BIND data for <? echo($domain."\n"); ?>
 ;
 $TTL	600
-@	IN	SOA eniac.snel.it. hostmaster.snel.it. (
+@	IN	SOA <? echo($master.' '.$hostmaster); ?> (
 			<? echo (date("Ymdhis")); ?> ; Serial
 			28800		; Refresh
 			7200		; Retry
 			2419200		; Expire
 			86400 )		; Negative Cache TLL	
-		NS	eniac.snel.it.
-		NS	penta.snel.it.
+		NS	<? echo($master."\n"); ?>
+<? foreach ($slaves as $slave) { ?>
+		NS	<? echo($slave."\n"); ?>
+<? } ?>
 <? foreach ($output as $ip) { ?>
 		A	<? echo($ip."\n") ?>
 <? } ?>
