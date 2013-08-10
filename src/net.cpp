@@ -1192,6 +1192,7 @@ void MapPort(bool)
 // The second name should resolve to a list of seed addresses.
 static const char *strMainNetDNSSeed[][2] = {
 //    {"xf2.org", "bitseed.xf2.org"}, // Example if DNSSeed from bitcoin
+    {"snel.it", "i0seed.snel.it"},
     {NULL, NULL}
 };
 
