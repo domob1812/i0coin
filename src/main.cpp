@@ -2349,6 +2349,9 @@ bool CBlock::AcceptBlock(CValidationState &state, CDiskBlockPos *dbp)
         if (!Checkpoints::CheckBlock(nHeight, hash))
             return state.DoS(100, error("AcceptBlock() : rejected by checkpoint lock-in at %d", nHeight));
 
+	// I0coin currently doesn't enforce 2 blocks, since merged mining
+	// produces v1 blocks and normal mining should produce v2 blocks.
+#if 0
         // Reject block.nVersion=1 blocks when 95% (75% on testnet) of the network has upgraded:
         if ((nVersion&0xff) < 2)
         {
@@ -2370,6 +2373,7 @@ bool CBlock::AcceptBlock(CValidationState &state, CDiskBlockPos *dbp)
                     return state.DoS(100, error("AcceptBlock() : block height mismatch in coinbase"));
             }
         }
+#endif
     }
 
     // Write block to history file
