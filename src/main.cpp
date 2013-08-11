@@ -1742,8 +1742,9 @@ bool CBlock::ConnectBlock(CValidationState &state, CBlockIndex* pindex, CCoinsVi
         }
     }
 
-    // when will BIP16 be active in I0C? I have no clue. Set it to INT64_MAX for now.
-    int64 nBIP16SwitchTime = 0x7fffffffffffffffLL; //from Bitcoin: 1333238400;
+    // BIP16 will be enabled for I0coin on 2013-08-23 0:00 UTC
+    // date -d "2013-08-23 0:00 UTC" +"%s"
+    int64 nBIP16SwitchTime = 1377216000;
     bool fStrictPayToScriptHash = (pindex->nTime >= nBIP16SwitchTime);
 
     unsigned int flags = SCRIPT_VERIFY_NOCACHE |
