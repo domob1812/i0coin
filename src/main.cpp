@@ -1721,8 +1721,9 @@ bool CBlock::ConnectBlock(CValidationState &state, CBlockIndex* pindex, CCoinsVi
     //
     // This rule applies to all Bitcoin blocks whose timestamp is after March 15, 2012, 0:00 UTC.
     //
-    // When should this happen in i0coin? Not yet...
-    int64 nBIP30SwitchTime = 0x7fffffffffffffffLL;
+    // BIP30 for I0coin will go into effect on 2013-08-23 0:00 UTC 
+    // date -d "2013-08-23 0:00 UTC" +"%s"
+    int64 nBIP30SwitchTime = 1377216000;
     bool fEnforceBIP30 = (pindex->nTime > nBIP30SwitchTime);
 
     // after BIP30 is enabled for some time, we could make the same change
