@@ -2247,9 +2247,9 @@ bool CBlock::CheckBlock(CValidationState &state, int nHeight, bool fCheckPOW, bo
     // Bitcoin had a chain split because of incompatible changes in 0.8.x
     // old releases had some difficulty with large blocks with many transactions
     //
-    // for now, in I0coin, we enforce BDB limits to keep the chain from splitting
-    // Special short-term limits to avoid 10,000 BDB lock limit:
-    if (true)
+    // on 2013-08-23 0:00 UTC we will stop enforcing BDB limits
+    // date -d "2013-08-23 0:00 UTC" +"%s" = 1377216000
+    if (GetBlockTime() < 1377216000)
     {
         // Rule is: #unique txids referenced <= 4,500
         // ... to prevent 10,000 BDB lock exhaustion on old clients
@@ -4376,9 +4376,9 @@ CBlockTemplate* CreateNewBlock(CReserveKey& reservekey)
     // Bitcoin had a chain split because of incompatible changes in 0.8.x
     // old releases had some difficulty with large blocks with many transactions
     //
-    // for now, in I0coin, we enforce BDB limits to keep the chain from splitting
-    // Special short-term limits to avoid 10,000 BDB lock limit:
-    if (true)
+    // on 2013-08-23 0:00 UTC we will stop enforcing BDB limits
+    // date -d "2013-08-23 0:00 UTC" +"%s" = 1377216000
+    if (GetAdjustedTime() < 1377216000)
         nBlockMaxSize = std::min(nBlockMaxSize, (unsigned int)(MAX_BLOCK_SIZE_GEN));
 
     // How much of the block should be dedicated to high-priority transactions,
