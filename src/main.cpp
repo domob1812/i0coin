@@ -1236,24 +1236,52 @@ unsigned int static GetNextWorkRequired(const CBlockIndex* pindexLast, const CBl
 
     // Limit adjustment step
     int64 nActualTimespan = pindexLast->GetBlockTime() - pindexFirst->GetBlockTime();
-    int64 nTwoPercent = nTargetTimespan/50;
     //printf("  nActualTimespan = %"PRI64d"  before bounds\n", nActualTimespan);
 
-    if (nActualTimespan < nTargetTimespan)  //is time taken for a block less than 3minutes?
-    {
-         //limit increase to a much lower amount than dictates to get past the pump-n-dump mining phase
-        //due to retargets being done more often it also needs to be lowered significantly from the 4x increase
-        if(nActualTimespan<(nTwoPercent*16)) //less than a minute?
-            nActualTimespan=(nTwoPercent*45); //pretend it was only 10% faster than desired
-        else if(nActualTimespan<(nTwoPercent*32)) //less than 2 minutes?
-            nActualTimespan=(nTwoPercent*47); //pretend it was only 6% faster than desired
-        else
-            nActualTimespan=(nTwoPercent*49); //pretend it was only 2% faster than desired
+    // assymmetric retarget (slow difficulty rise / fast difficulty drop) can be
+    // abused to make a 51% attack more profitable than it should be,
+    // therefore we adopt (starting at block 890000) a symmetric algorithm based
+    // on bitcoin's algorithm.
+    //
+    // we retarget at most by a factor of 4^(120/2016) = 1.086
 
-        //int64 nTime=nTargetTimespan-nActualTimespan;
-        //nActualTimespan = nTargetTimespan/2;
+    if (height < 890000) {  // use the old retarget algorithm
+    	int64 nTwoPercent = nTargetTimespan/50;
+    	if (nActualTimespan < nTargetTimespan)  //is time taken for a block less than 3minutes?
+    	{
+            //limit increase to a much lower amount than dictates to get past the pump-n-dump mining phase
+            //due to retargets being done more often it also needs to be lowered significantly from the 4x increase
+            if(nActualTimespan<(nTwoPercent*16)) //less than a minute?
+               nActualTimespan=(nTwoPercent*45); //pretend it was only 10% faster than desired
+            else if(nActualTimespan<(nTwoPercent*32)) //less than 2 minutes?
+                nActualTimespan=(nTwoPercent*47); //pretend it was only 6% faster than desired
+            else
+                nActualTimespan=(nTwoPercent*49); //pretend it was only 2% faster than desired
+
+            //int64 nTime=nTargetTimespan-nActualTimespan;
+            //nActualTimespan = nTargetTimespan/2;
+        }
+        else if (nActualTimespan > nTargetTimespan*4)   nActualTimespan = nTargetTimespan*4;
+    } else { // new algorithm
+        // use integer aritmmetic to make sure that
+        // all architectures return the exact same answers,
+        // so instead of:
+        //
+        //  foo < bar/1.086     we do   foo < (1000*bar)/1086
+        //  foo = bar/1.086     we do   foo = (1000*bar)/1086 
+        //  foo > bar*1.086     we do   foo > (1086*bar)/1000
+        //  foo = bar*1.086     we do   foo = (1086*bar)/1000 
+        //
+        // (parentheses to stress desired operator precedence)
+        //
+        // risk of overflow? no way; bar is quite small and
+        // we have it under control, it is defined as 3*60*60
+
+        if (nActualTimespan < (1000*nTargetTimespan)/1086)
+            nActualTimespan = (1000*nTargetTimespan)/1086;
+        else if (nActualTimespan > (1086*nTargetTimespan)/1000)
+            nActualTimespan = (1086*nTargetTimespan)/1000;
     }
-    else if (nActualTimespan > nTargetTimespan*4)   nActualTimespan = nTargetTimespan*4;
 
     // Retarget
     CBigNum bnNew;
@@ -1721,8 +1749,9 @@ bool CBlock::ConnectBlock(CValidationState &state, CBlockIndex* pindex, CCoinsVi
     //
     // This rule applies to all Bitcoin blocks whose timestamp is after March 15, 2012, 0:00 UTC.
     //
-    // When should this happen in i0coin? Not yet...
-    int64 nBIP30SwitchTime = 0x7fffffffffffffffLL;
+    // BIP30 for I0coin will go into effect on 2013-08-23 0:00 UTC 
+    // date -d "2013-08-23 0:00 UTC" +"%s"
+    int64 nBIP30SwitchTime = 1377216000;
     bool fEnforceBIP30 = (pindex->nTime > nBIP30SwitchTime);
 
     // after BIP30 is enabled for some time, we could make the same change
@@ -1742,8 +1771,9 @@ bool CBlock::ConnectBlock(CValidationState &state, CBlockIndex* pindex, CCoinsVi
         }
     }
 
-    // when will BIP16 be active in I0C? I have no clue. Set it to INT64_MAX for now.
-    int64 nBIP16SwitchTime = 0x7fffffffffffffffLL; //from Bitcoin: 1333238400;
+    // BIP16 will be enabled for I0coin on 2013-08-23 0:00 UTC
+    // date -d "2013-08-23 0:00 UTC" +"%s"
+    int64 nBIP16SwitchTime = 1377216000;
     bool fStrictPayToScriptHash = (pindex->nTime >= nBIP16SwitchTime);
 
     unsigned int flags = SCRIPT_VERIFY_NOCACHE |
@@ -2247,9 +2277,9 @@ bool CBlock::CheckBlock(CValidationState &state, int nHeight, bool fCheckPOW, bo
     // Bitcoin had a chain split because of incompatible changes in 0.8.x
     // old releases had some difficulty with large blocks with many transactions
     //
-    // for now, in I0coin, we enforce BDB limits to keep the chain from splitting
-    // Special short-term limits to avoid 10,000 BDB lock limit:
-    if (true)
+    // on 2013-08-23 0:00 UTC we will stop enforcing BDB limits
+    // date -d "2013-08-23 0:00 UTC" +"%s" = 1377216000
+    if (GetBlockTime() < 1377216000)
     {
         // Rule is: #unique txids referenced <= 4,500
         // ... to prevent 10,000 BDB lock exhaustion on old clients
@@ -2349,6 +2379,9 @@ bool CBlock::AcceptBlock(CValidationState &state, CDiskBlockPos *dbp)
         if (!Checkpoints::CheckBlock(nHeight, hash))
             return state.DoS(100, error("AcceptBlock() : rejected by checkpoint lock-in at %d", nHeight));
 
+	// I0coin currently doesn't enforce 2 blocks, since merged mining
+	// produces v1 blocks and normal mining should produce v2 blocks.
+#if 0
         // Reject block.nVersion=1 blocks when 95% (75% on testnet) of the network has upgraded:
         if ((nVersion&0xff) < 2)
         {
@@ -2370,6 +2403,7 @@ bool CBlock::AcceptBlock(CValidationState &state, CDiskBlockPos *dbp)
                     return state.DoS(100, error("AcceptBlock() : block height mismatch in coinbase"));
             }
         }
+#endif
     }
 
     // Write block to history file
@@ -4376,9 +4410,9 @@ CBlockTemplate* CreateNewBlock(CReserveKey& reservekey)
     // Bitcoin had a chain split because of incompatible changes in 0.8.x
     // old releases had some difficulty with large blocks with many transactions
     //
-    // for now, in I0coin, we enforce BDB limits to keep the chain from splitting
-    // Special short-term limits to avoid 10,000 BDB lock limit:
-    if (true)
+    // on 2013-08-23 0:00 UTC we will stop enforcing BDB limits
+    // date -d "2013-08-23 0:00 UTC" +"%s" = 1377216000
+    if (GetAdjustedTime() < 1377216000)
         nBlockMaxSize = std::min(nBlockMaxSize, (unsigned int)(MAX_BLOCK_SIZE_GEN));
 
     // How much of the block should be dedicated to high-priority transactions,
