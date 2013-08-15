@@ -1240,12 +1240,12 @@ unsigned int static GetNextWorkRequired(const CBlockIndex* pindexLast, const CBl
 
     // assymmetric retarget (slow difficulty rise / fast difficulty drop) can be
     // abused to make a 51% attack more profitable than it should be,
-    // therefore we adopt (starting at block 890000) a symmetric algorithm based
+    // therefore we adopt (starting at block 895000) a symmetric algorithm based
     // on bitcoin's algorithm.
     //
     // we retarget at most by a factor of 4^(120/2016) = 1.086
 
-    if (height < 890000) {  // use the old retarget algorithm
+    if (height < 895000) {  // use the old retarget algorithm
     	int64 nTwoPercent = nTargetTimespan/50;
     	if (nActualTimespan < nTargetTimespan)  //is time taken for a block less than 3minutes?
     	{
@@ -1749,9 +1749,9 @@ bool CBlock::ConnectBlock(CValidationState &state, CBlockIndex* pindex, CCoinsVi
     //
     // This rule applies to all Bitcoin blocks whose timestamp is after March 15, 2012, 0:00 UTC.
     //
-    // BIP30 for I0coin will go into effect on 2013-08-23 0:00 UTC 
-    // date -d "2013-08-23 0:00 UTC" +"%s"
-    int64 nBIP30SwitchTime = 1377216000;
+    // BIP30 for I0coin will go into effect on 2013-09-01 0:00 UTC 
+    // date -d "2013-09-01 0:00 UTC" +"%s"
+    int64 nBIP30SwitchTime = 1377993600;
     bool fEnforceBIP30 = (pindex->nTime > nBIP30SwitchTime);
 
     // after BIP30 is enabled for some time, we could make the same change
@@ -1771,9 +1771,9 @@ bool CBlock::ConnectBlock(CValidationState &state, CBlockIndex* pindex, CCoinsVi
         }
     }
 
-    // BIP16 will be enabled for I0coin on 2013-08-23 0:00 UTC
-    // date -d "2013-08-23 0:00 UTC" +"%s"
-    int64 nBIP16SwitchTime = 1377216000;
+    // BIP16 will be enabled for I0coin on 2013-09-01 0:00 UTC
+    // date -d "2013-09-01 0:00 UTC" +"%s"
+    int64 nBIP16SwitchTime = 1377993600;
     bool fStrictPayToScriptHash = (pindex->nTime >= nBIP16SwitchTime);
 
     unsigned int flags = SCRIPT_VERIFY_NOCACHE |
@@ -2277,9 +2277,9 @@ bool CBlock::CheckBlock(CValidationState &state, int nHeight, bool fCheckPOW, bo
     // Bitcoin had a chain split because of incompatible changes in 0.8.x
     // old releases had some difficulty with large blocks with many transactions
     //
-    // on 2013-08-23 0:00 UTC we will stop enforcing BDB limits
-    // date -d "2013-08-23 0:00 UTC" +"%s" = 1377216000
-    if (GetBlockTime() < 1377216000)
+    // on 2013-09-01 0:00 UTC we will stop enforcing BDB limits
+    // date -d "2013-09-01 0:00 UTC" +"%s"
+    if (GetBlockTime() < 1377993600)
     {
         // Rule is: #unique txids referenced <= 4,500
         // ... to prevent 10,000 BDB lock exhaustion on old clients
@@ -4410,9 +4410,9 @@ CBlockTemplate* CreateNewBlock(CReserveKey& reservekey)
     // Bitcoin had a chain split because of incompatible changes in 0.8.x
     // old releases had some difficulty with large blocks with many transactions
     //
-    // on 2013-08-23 0:00 UTC we will stop enforcing BDB limits
-    // date -d "2013-08-23 0:00 UTC" +"%s" = 1377216000
-    if (GetAdjustedTime() < 1377216000)
+    // on 2013-09-01 0:00 UTC we will stop enforcing BDB limits
+    // date -d "2013-09-01 0:00 UTC" +"%s"
+    if (GetAdjustedTime() < 1377993600)
         nBlockMaxSize = std::min(nBlockMaxSize, (unsigned int)(MAX_BLOCK_SIZE_GEN));
 
     // How much of the block should be dedicated to high-priority transactions,
