@@ -5,7 +5,7 @@ SetCompressor /SOLID lzma
 
 # General Symbol Definitions
 !define REGKEY "SOFTWARE\$(^Name)"
-!define VERSION 0.8.3-2rc1
+!define VERSION 0.8.3-2rc2
 !define COMPANY "I0coin project"
 !define URL http://i0coin.snel.it/
 
@@ -51,7 +51,7 @@ CRCCheck on
 XPStyle on
 BrandingText " "
 ShowInstDetails show
-VIProductVersion 0.8.3.2
+VIProductVersion 0.8.3.3
 VIAddVersionKey ProductName I0coin
 VIAddVersionKey ProductVersion "${VERSION}"
 VIAddVersionKey CompanyName "${COMPANY}"
