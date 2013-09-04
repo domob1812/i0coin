@@ -1,5 +1,4 @@
-I0coin 0.8.3-2 BETA
-===================
+I0coin 0.8.4-1rc1 BETA
 
 Copyright (c) 2009-2013 Bitcoin and I0coin Developers
 
