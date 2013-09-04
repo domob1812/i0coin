@@ -1,4 +1,4 @@
-I0coin 0.8.4-1rc1 BETA
+I0coin 0.8.4-1rc2 BETA
 
 Copyright (c) 2009-2013 Bitcoin and I0coin Developers
 Distributed under the MIT/X11 software license, see the accompanying
