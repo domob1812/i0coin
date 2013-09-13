@@ -1,4 +1,4 @@
-Bitcoin 0.8.5-1rc1 BETA
+Bitcoin 0.8.5-1 BETA
 
 Copyright (c) 2009-2013 Bitcoin and I0coin Developers
 Distributed under the MIT/X11 software license, see the accompanying
