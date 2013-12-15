@@ -5,7 +5,7 @@ SetCompressor /SOLID lzma
 
 # General Symbol Definitions
 !define REGKEY "SOFTWARE\$(^Name)"
-!define VERSION 0.8.5-1
+!define VERSION 0.8.6-1
 !define COMPANY "I0coin project"
 !define URL http://i0coin.snel.it/
 
@@ -45,13 +45,13 @@ Var StartMenuGroup
 !insertmacro MUI_LANGUAGE English
 
 # Installer attributes
-OutFile i0coin-0.8.5-1-win32-setup.exe
+OutFile i0coin-0.8.6-1-win32-setup.exe
 InstallDir $PROGRAMFILES\I0coin
 CRCCheck on
 XPStyle on
 BrandingText " "
 ShowInstDetails show
-VIProductVersion 0.8.5.1
+VIProductVersion 0.8.6.0
 VIAddVersionKey ProductName I0coin
 VIAddVersionKey ProductVersion "${VERSION}"
 VIAddVersionKey CompanyName "${COMPANY}"
