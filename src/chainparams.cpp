@@ -73,10 +73,10 @@ public:
         consensus.fPowAllowMinDifficultyBlocks = false;
         consensus.fPowNoRetargeting = false;
 
-        consensus.nAuxpowChainId = 0x0001;
-        consensus.nAuxpowStartHeight = 19200;
+        consensus.nAuxpowChainId = 0x0002;
+        consensus.nAuxpowStartHeight = 160000;
         consensus.fStrictChainId = true;
-        consensus.nLegacyBlocksBefore = 19200;
+        consensus.nLegacyBlocksBefore = 160000;
 
         /** 
          * The message start string is designed to be unlikely to occur in normal data.
@@ -158,7 +158,7 @@ public:
         consensus.fPowNoRetargeting = false;
 
         consensus.nAuxpowStartHeight = 0;
-        consensus.nAuxpowChainId = 0x0001;
+        consensus.nAuxpowChainId = 0x0002;
         consensus.fStrictChainId = false;
         consensus.nLegacyBlocksBefore = -1;
 
@@ -228,7 +228,7 @@ public:
         consensus.fPowNoRetargeting = true;
 
         consensus.nAuxpowStartHeight = 0;
-        consensus.nAuxpowChainId = 0x0001;
+        consensus.nAuxpowChainId = 0x0002;
         consensus.fStrictChainId = true;
         consensus.nLegacyBlocksBefore = 0;
 
