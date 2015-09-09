@@ -15,6 +15,7 @@ using namespace std;
 
 BOOST_FIXTURE_TEST_SUITE(pow_tests, BasicTestingSetup)
 
+#if 0
 /* Test calculation of next difficulty target with no constraints applying */
 BOOST_AUTO_TEST_CASE(get_next_work)
 {
@@ -94,5 +95,6 @@ BOOST_AUTO_TEST_CASE(GetBlockProofEquivalentTime_test)
         BOOST_CHECK_EQUAL(tdiff, p1->GetBlockTime() - p2->GetBlockTime());
     }
 }
+#endif
 
 BOOST_AUTO_TEST_SUITE_END()
