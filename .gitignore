@@ -7,6 +7,9 @@ src/bitcoin-cli
 src/bitcoin-tx
 src/test/test_bitcoin
 src/qt/test/test_bitcoin-qt
+src/i0coind
+src/i0coin-cli
+src/i0coin-tx
 
 # autoreconf
 Makefile.in
@@ -76,6 +79,8 @@ src/qt/test/moc*.cpp
 Makefile
 bitcoin-qt
 Bitcoin-Qt.app
+i0coin-qt
+I0coin-Qt.app
 
 # Unit-tests
 Makefile.test
