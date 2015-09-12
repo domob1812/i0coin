@@ -1792,9 +1792,11 @@ bool ConnectBlock(const CBlock& block, CValidationState& state, CBlockIndex* pin
     // Now that the whole chain is irreversibly beyond that time it is applied to all blocks except the
     // two in the chain that violate it. This prevents exploiting the issue against nodes during their
     // initial block download.
-    // FIXME: Enable strict check after appropriate fork.
-    bool fEnforceBIP30 = (!pindex->phashBlock) || // Enforce on CreateNewBlock invocations which don't have a hash.
-                          !(true);
+    //
+    // BIP30 for I0coin went into effect on 2013-09-01 0:00 UTC
+    // date -d "2013-09-01 0:00 UTC" +"%s"
+    // There are no blocks that violate it, though.
+    const bool fEnforceBIP30 = true;
     if (fEnforceBIP30) {
         BOOST_FOREACH(const CTransaction& tx, block.vtx) {
             const CCoins* coins = view.AccessCoins(tx.GetHash());
@@ -1804,9 +1806,10 @@ bool ConnectBlock(const CBlock& block, CValidationState& state, CBlockIndex* pin
         }
     }
 
-    // Disable BIP16 checks for now.
-    // FIXME: Enable at some point in the future.
-    const bool fStrictPayToScriptHash = false;
+    // BIP16 will be enabled for I0coin on 2013-09-01 0:00 UTC
+    // date -d "2013-09-01 0:00 UTC" +"%s"
+    const int64_t nBIP16SwitchTime = 1377993600;
+    bool fStrictPayToScriptHash = (pindex->nTime >= nBIP16SwitchTime);
 
     unsigned int flags = fStrictPayToScriptHash ? SCRIPT_VERIFY_P2SH : SCRIPT_VERIFY_NONE;
 
