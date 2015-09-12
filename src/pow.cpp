@@ -137,24 +137,51 @@ unsigned int GetNextWorkRequired(const CBlockIndex* pindexLast, const CBlockHead
    // Limit adjustment step
    const int64_t nTargetTimespan = params.nPowTargetTimespan;
    int64_t nActualTimespan = pindexLast->GetBlockTime() - pindexFirst->GetBlockTime();
-   int64_t nTwoPercent = nTargetTimespan/50;
-   //printf("  nActualTimespan = %"PRI64d"  before bounds\n", nActualTimespan);
 
-   if (nActualTimespan < nTargetTimespan)  //is time taken for a block less than 3minutes?
-   {
-        //limit increase to a much lower amount than dictates to get past the pump-n-dump mining phase
-        //due to retargets being done more often it also needs to be lowered significantly from the 4x increase
-        if(nActualTimespan<(nTwoPercent*16)) //less than a minute?
-            nActualTimespan=(nTwoPercent*45); //pretend it was only 10% faster than desired
-        else if(nActualTimespan<(nTwoPercent*32)) //less than 2 minutes?
-            nActualTimespan=(nTwoPercent*47); //pretend it was only 6% faster than desired
-        else
-            nActualTimespan=(nTwoPercent*49); //pretend it was only 2% faster than desired
+    // assymmetric retarget (slow difficulty rise / fast difficulty drop) can be
+    // abused to make a 51% attack more profitable than it should be,
+    // therefore we adopt (starting at block 895000) a symmetric algorithm based
+    // on bitcoin's algorithm.
+    //
+    // we retarget at most by a factor of 4^(120/2016) = 1.086
 
-        //int64 nTime=nTargetTimespan-nActualTimespan;
-        //nActualTimespan = nTargetTimespan/2;
+    if (height < 895000) {  // use the old retarget algorithm
+    	const int64_t nTwoPercent = nTargetTimespan/50;
+    	if (nActualTimespan < nTargetTimespan)  //is time taken for a block less than 3minutes?
+    	{
+            //limit increase to a much lower amount than dictates to get past the pump-n-dump mining phase
+            //due to retargets being done more often it also needs to be lowered significantly from the 4x increase
+            if(nActualTimespan<(nTwoPercent*16)) //less than a minute?
+               nActualTimespan=(nTwoPercent*45); //pretend it was only 10% faster than desired
+            else if(nActualTimespan<(nTwoPercent*32)) //less than 2 minutes?
+                nActualTimespan=(nTwoPercent*47); //pretend it was only 6% faster than desired
+            else
+                nActualTimespan=(nTwoPercent*49); //pretend it was only 2% faster than desired
+
+            //int64 nTime=nTargetTimespan-nActualTimespan;
+            //nActualTimespan = nTargetTimespan/2;
+        }
+        else if (nActualTimespan > nTargetTimespan*4)   nActualTimespan = nTargetTimespan*4;
+    } else { // new algorithm
+        // use integer aritmmetic to make sure that
+        // all architectures return the exact same answers,
+        // so instead of:
+        //
+        //  foo < bar/1.086     we do   foo < (1000*bar)/1086
+        //  foo = bar/1.086     we do   foo = (1000*bar)/1086
+        //  foo > bar*1.086     we do   foo > (1086*bar)/1000
+        //  foo = bar*1.086     we do   foo = (1086*bar)/1000
+        //
+        // (parentheses to stress desired operator precedence)
+        //
+        // risk of overflow? no way; bar is quite small and
+        // we have it under control, it is defined as 3*60*60
+
+        if (nActualTimespan < (1000*nTargetTimespan)/1086)
+            nActualTimespan = (1000*nTargetTimespan)/1086;
+        else if (nActualTimespan > (1086*nTargetTimespan)/1000)
+            nActualTimespan = (1086*nTargetTimespan)/1000;
     }
-    else if (nActualTimespan > nTargetTimespan*4)   nActualTimespan = nTargetTimespan*4;
 
     // Retarget
     arith_uint256 bnNew;
