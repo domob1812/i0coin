@@ -4526,7 +4526,10 @@ bool static ProcessMessage(CNode* pfrom, string strCommand, CDataStream& vRecv, 
 
         // Bypass the normal CBlock deserialization, as we don't want to risk deserializing 2000 full blocks.
         unsigned int nCount = ReadCompactSize(vRecv);
-        if (nCount > MAX_HEADERS_RESULTS) {
+        /* MAX_HEADERS_RESULTS was changed from 2000 to 1000.  Do not disconnect
+           nodes following the old constant.  */
+        /* FIXME: This can be changed once the network has upgraded.  */
+        if (nCount > 2000) {
             Misbehaving(pfrom->GetId(), 20);
             return error("headers message count = %u", nCount);
         }
