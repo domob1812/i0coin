@@ -1788,15 +1788,11 @@ bool ConnectBlock(const CBlock& block, CValidationState& state, CBlockIndex* pin
     // See BIP30 and http://r6.ca/blog/20120206T005236Z.html for more information.
     // This logic is not necessary for memory pool transactions, as AcceptToMemoryPool
     // already refuses previously-known transaction ids entirely.
-    // This rule was originally applied to all blocks with a timestamp after March 15, 2012, 0:00 UTC.
-    // Now that the whole chain is irreversibly beyond that time it is applied to all blocks except the
-    // two in the chain that violate it. This prevents exploiting the issue against nodes during their
-    // initial block download.
     //
     // BIP30 for I0coin went into effect on 2013-09-01 0:00 UTC
     // date -d "2013-09-01 0:00 UTC" +"%s"
-    // There are no blocks that violate it, though.
-    const bool fEnforceBIP30 = true;
+    const int64_t nBIP30SwitchTime = 1377993600;
+    bool fEnforceBIP30 = (pindex->nTime >= nBIP30SwitchTime);
     if (fEnforceBIP30) {
         BOOST_FOREACH(const CTransaction& tx, block.vtx) {
             const CCoins* coins = view.AccessCoins(tx.GetHash());
