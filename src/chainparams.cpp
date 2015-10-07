@@ -97,7 +97,7 @@ public:
         assert(consensus.hashGenesisBlock == uint256S("0x00000000de13b7f748fb214e3f9c284fe6a57e1559fee545bfe473f72599c0d1"));
         assert(genesis.hashMerkleRoot == uint256S("0x764fc5f8e5c2ef66fd00f815348d965b80a852800379e20e9336ecaa68864034"));
 
-        vSeeds.push_back(CDNSSeedData("domob.eu", "i0coin.seed.domob.eu"));
+        vSeeds.push_back(CDNSSeedData("domob.eu", "seed.i0coin.domob.eu"));
 
         base58Prefixes[PUBKEY_ADDRESS] = std::vector<unsigned char>(1,105);
         /* TODO: Update address formats below?  */
