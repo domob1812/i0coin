@@ -10,4 +10,6 @@
 198.154.60.61
 162.213.153.7
 
+# Known .onion nodes.
 ybs6nrn4bpvckalt.onion
+dsta6rp7qq44vf77.onion
