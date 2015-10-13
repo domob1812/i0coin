@@ -1,5 +1,6 @@
 # Seeder VPS.
 51.254.131.226:7333
+ybs6nrn4bpvckalt.onion
 
 92.8.200.247:7337
 92.3.36.153
@@ -11,5 +12,4 @@
 162.213.153.7
 
 # Known .onion nodes.
-ybs6nrn4bpvckalt.onion
-dsta6rp7qq44vf77.onion
+7oka42m6h3rbxxzj.onion
