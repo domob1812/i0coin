@@ -20,7 +20,7 @@ static const int GETHEADERS_VERSION = 31800;
 //! disconnect from peers older than this proto version
 // This is the version with modified "headers" size of 1,000 instead
 // of the original 2,000.
-static const int MIN_PEER_PROTO_VERSION = 80601;
+static const int MIN_PEER_PROTO_VERSION = GETHEADERS_VERSION;
 
 //! nTime field added to CAddress, starting with this version;
 //! if possible, avoid requesting addresses nodes older than this
