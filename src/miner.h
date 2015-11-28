@@ -17,6 +17,8 @@ class CScript;
 class CWallet;
 namespace Consensus { struct Params; };
 
+static const int DEFAULT_GENERATE_THREADS = 1;
+
 struct CBlockTemplate
 {
     CBlock block;
@@ -27,7 +29,7 @@ struct CBlockTemplate
 /** Run the miner threads */
 void GenerateBitcoins(bool fGenerate, int nThreads, const CChainParams& chainparams);
 /** Generate a new block, without valid proof-of-work */
-CBlockTemplate* CreateNewBlock(const CScript& scriptPubKeyIn);
+CBlockTemplate* CreateNewBlock(const CChainParams& chainparams, const CScript& scriptPubKeyIn);
 /** Modify the extranonce in a block */
 void IncrementExtraNonce(CBlock* pblock, const CBlockIndex* pindexPrev, unsigned int& nExtraNonce);
 int64_t UpdateTime(CBlockHeader* pblock, const Consensus::Params& consensusParams, const CBlockIndex* pindexPrev);

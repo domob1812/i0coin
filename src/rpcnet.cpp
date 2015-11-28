@@ -90,6 +90,7 @@ UniValue getpeerinfo(const UniValue& params, bool fHelp)
             "    \"addr\":\"host:port\",      (string) The ip address and port of the peer\n"
             "    \"addrlocal\":\"ip:port\",   (string) local address\n"
             "    \"services\":\"xxxxxxxxxxxxxxxx\",   (string) The services offered\n"
+            "    \"relaytxes\":true|false,    (boolean) Whether peer has asked us to relay transactions to it\n"
             "    \"lastsend\": ttt,           (numeric) The time in seconds since epoch (Jan 1 1970 GMT) of the last send\n"
             "    \"lastrecv\": ttt,           (numeric) The time in seconds since epoch (Jan 1 1970 GMT) of the last receive\n"
             "    \"bytessent\": n,            (numeric) The total bytes sent\n"
@@ -134,6 +135,7 @@ UniValue getpeerinfo(const UniValue& params, bool fHelp)
         if (!(stats.addrLocal.empty()))
             obj.push_back(Pair("addrlocal", stats.addrLocal));
         obj.push_back(Pair("services", strprintf("%016x", stats.nServices)));
+        obj.push_back(Pair("relaytxes", stats.fRelayTxes));
         obj.push_back(Pair("lastsend", stats.nLastSend));
         obj.push_back(Pair("lastrecv", stats.nLastRecv));
         obj.push_back(Pair("bytessent", stats.nSendBytes));
@@ -368,7 +370,16 @@ UniValue getnettotals(const UniValue& params, bool fHelp)
             "{\n"
             "  \"totalbytesrecv\": n,   (numeric) Total bytes received\n"
             "  \"totalbytessent\": n,   (numeric) Total bytes sent\n"
-            "  \"timemillis\": t        (numeric) Total cpu time\n"
+            "  \"timemillis\": t,       (numeric) Total cpu time\n"
+            "  \"uploadtarget\":\n"
+            "  {\n"
+            "    \"timeframe\": n,                         (numeric) Length of the measuring timeframe in seconds\n"
+            "    \"target\": n,                            (numeric) Target in bytes\n"
+            "    \"target_reached\": true|false,           (boolean) True if target is reached\n"
+            "    \"serve_historical_blocks\": true|false,  (boolean) True if serving historical blocks\n"
+            "    \"bytes_left_in_cycle\": t,               (numeric) Bytes left in current time cycle\n"
+            "    \"time_left_in_cycle\": t                 (numeric) Seconds left in current time cycle\n"
+            "  }\n"
             "}\n"
             "\nExamples:\n"
             + HelpExampleCli("getnettotals", "")

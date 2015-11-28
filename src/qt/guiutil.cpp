@@ -88,7 +88,7 @@ QString dateTimeStr(qint64 nTime)
     return dateTimeStr(QDateTime::fromTime_t((qint32)nTime));
 }
 
-QFont bitcoinAddressFont()
+QFont fixedPitchFont()
 {
     QFont font("Monospace");
 #if QT_VERSION >= 0x040800
@@ -103,7 +103,7 @@ void setupAddressWidget(QValidatedLineEdit *widget, QWidget *parent)
 {
     parent->setFocusProxy(widget);
 
-    widget->setFont(bitcoinAddressFont());
+    widget->setFont(fixedPitchFont());
 #if QT_VERSION >= 0x040700
     // We don't want translators to use own addresses in translations
     // and this is the only place, where this address is supplied.
@@ -581,12 +581,12 @@ TableViewLastColumnResizingFixer::TableViewLastColumnResizingFixer(QTableView* t
 #ifdef WIN32
 boost::filesystem::path static StartupShortcutPath()
 {
-    if (GetBoolArg("-testnet", false))
+    std::string chain = ChainNameFromCommandLine();
+    if (chain == CBaseChainParams::MAIN)
+        return GetSpecialFolderPath(CSIDL_STARTUP) / "I0coin.lnk";
+    if (chain == CBaseChainParams::TESTNET) // Remove this special case when CBaseChainParams::TESTNET = "testnet4"
         return GetSpecialFolderPath(CSIDL_STARTUP) / "I0coin (testnet).lnk";
-    else if (GetBoolArg("-regtest", false))
-        return GetSpecialFolderPath(CSIDL_STARTUP) / "I0coin (regtest).lnk";
-
-    return GetSpecialFolderPath(CSIDL_STARTUP) / "I0coin.lnk";
+    return GetSpecialFolderPath(CSIDL_STARTUP) / strprintf("I0coin (%s).lnk", chain);
 }
 
 bool GetStartOnSystemStartup()
@@ -681,7 +681,10 @@ boost::filesystem::path static GetAutostartDir()
 
 boost::filesystem::path static GetAutostartFilePath()
 {
-    return GetAutostartDir() / "i0coin.desktop";
+    std::string chain = ChainNameFromCommandLine();
+    if (chain == CBaseChainParams::MAIN)
+        return GetAutostartDir() / "i0coin.desktop";
+    return GetAutostartDir() / strprintf("i0coin-%s.lnk", chain);
 }
 
 bool GetStartOnSystemStartup()
@@ -719,15 +722,14 @@ bool SetStartOnSystemStartup(bool fAutoStart)
         boost::filesystem::ofstream optionFile(GetAutostartFilePath(), std::ios_base::out|std::ios_base::trunc);
         if (!optionFile.good())
             return false;
-        // Write a i0coin.desktop file to the autostart directory:
+        std::string chain = ChainNameFromCommandLine();
+        // Write a bitcoin.desktop file to the autostart directory:
         optionFile << "[Desktop Entry]\n";
         optionFile << "Type=Application\n";
-        if (GetBoolArg("-testnet", false))
-            optionFile << "Name=I0coin (testnet)\n";
-        else if (GetBoolArg("-regtest", false))
-            optionFile << "Name=I0coin (regtest)\n";
-        else
+        if (chain == CBaseChainParams::MAIN)
             optionFile << "Name=I0coin\n";
+        else
+            optionFile << strprintf("Name=I0coin (%s)\n", chain);
         optionFile << "Exec=" << pszExePath << strprintf(" -min -testnet=%d -regtest=%d\n", GetBoolArg("-testnet", false), GetBoolArg("-regtest", false));
         optionFile << "Terminal=false\n";
         optionFile << "Hidden=false\n";

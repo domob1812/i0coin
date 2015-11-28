@@ -263,7 +263,13 @@ RPCConsole::RPCConsole(const PlatformStyle *platformStyle, QWidget *parent) :
     connect(ui->btnClearTrafficGraph, SIGNAL(clicked()), ui->trafficGraph, SLOT(clear()));
 
     // set library version labels
+
+#if (OPENSSL_VERSION_NUMBER < 0x10100000L)
     ui->openSSLVersion->setText(SSLeay_version(SSLEAY_VERSION));
+#else
+    ui->openSSLVersion->setText(OpenSSL_version(OPENSSL_VERSION));
+#endif
+
 #ifdef ENABLE_WALLET
     ui->berkeleyDBVersion->setText(DbEnv::version(0, 0, 0));
 #else
@@ -342,6 +348,8 @@ void RPCConsole::setClientModel(ClientModel *model)
 
         updateTrafficStats(model->getTotalBytesRecv(), model->getTotalBytesSent());
         connect(model, SIGNAL(bytesChanged(quint64,quint64)), this, SLOT(updateTrafficStats(quint64, quint64)));
+
+        connect(model, SIGNAL(mempoolSizeChanged(long,size_t)), this, SLOT(setMempoolSize(long,size_t)));
 
         // set up peer table
         ui->peerWidget->setModel(model->getPeerTableModel());
@@ -462,13 +470,19 @@ void RPCConsole::clear()
     }
 
     // Set default style sheet
+    QFontInfo fixedFontInfo(GUIUtil::fixedPitchFont());
+    // Try to make fixed font adequately large on different OS
+    QString ptSize = QString("%1pt").arg(QFontInfo(QFont()).pointSize() * 8.5 / 9);
     ui->messagesWidget->document()->setDefaultStyleSheet(
+        QString(
                 "table { }"
                 "td.time { color: #808080; padding-top: 3px; } "
+                "td.message { font-family: %1; font-size: %2; white-space:pre-wrap; } "
                 "td.cmd-request { color: #006060; } "
                 "td.cmd-error { color: red; } "
                 "b { color: #006060; } "
-                );
+            ).arg(fixedFontInfo.family(), ptSize)
+        );
 
     message(CMD_REPLY, (tr("Welcome to the I0coin Core RPC console.") + "<br>" +
                         tr("Use up and down arrows to navigate history, and <b>Ctrl-L</b> to clear screen.") + "<br>" +
@@ -494,7 +508,7 @@ void RPCConsole::message(int category, const QString &message, bool html)
     if(html)
         out += message;
     else
-        out += GUIUtil::HtmlEscape(message, true);
+        out += GUIUtil::HtmlEscape(message, false);
     out += "</td></tr></table>";
     ui->messagesWidget->append(out);
 }
@@ -515,6 +529,16 @@ void RPCConsole::setNumBlocks(int count, const QDateTime& blockDate)
 {
     ui->numberOfBlocks->setText(QString::number(count));
     ui->lastBlockTime->setText(blockDate.toString());
+}
+
+void RPCConsole::setMempoolSize(long numberOfTxs, size_t dynUsage)
+{
+    ui->mempoolNumberTxs->setText(QString::number(numberOfTxs));
+
+    if (dynUsage < 1000000)
+        ui->mempoolSize->setText(QString::number(dynUsage/1000.0, 'f', 2) + " KB");
+    else
+        ui->mempoolSize->setText(QString::number(dynUsage/1000000.0, 'f', 2) + " MB");
 }
 
 void RPCConsole::on_lineEdit_returnPressed()
@@ -849,4 +873,9 @@ void RPCConsole::showOrHideBanTableIfRequired()
     bool visible = clientModel->getBanTableModel()->shouldShow();
     ui->banlistWidget->setVisible(visible);
     ui->banHeading->setVisible(visible);
+}
+
+void RPCConsole::setTabFocus(enum TabTypes tabType)
+{
+    ui->tabWidget->setCurrentIndex(tabType);
 }
