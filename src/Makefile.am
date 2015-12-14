@@ -101,6 +101,7 @@ BITCOIN_CORE_H = \
   compat/sanity.h \
   compressor.h \
   consensus/consensus.h \
+  consensus/merkle.h \
   consensus/params.h \
   consensus/validation.h \
   core_io.h \
@@ -117,13 +118,13 @@ BITCOIN_CORE_H = \
   memusage.h \
   merkleblock.h \
   miner.h \
-  mruset.h \
   net.h \
   netbase.h \
   noui.h \
   policy/fees.h \
   policy/policy.h \
   pow.h \
+  prevector.h \
   primitives/block.h \
   primitives/pureheader.h \
   primitives/transaction.h \
@@ -271,6 +272,7 @@ libbitcoin_common_a_SOURCES = \
   chainparams.cpp \
   coins.cpp \
   compressor.cpp \
+  consensus/merkle.cpp \
   core_read.cpp \
   core_write.cpp \
   hash.cpp \
