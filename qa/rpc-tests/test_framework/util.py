@@ -1,4 +1,4 @@
-# Copyright (c) 2014 The Bitcoin Core developers
+# Copyright (c) 2014-2015 The Bitcoin Core developers
 # Distributed under the MIT software license, see the accompanying
 # file COPYING or http://www.opensource.org/licenses/mit-license.php.
 #
@@ -102,12 +102,12 @@ def initialize_datadir(dirname, n):
     if not os.path.isdir(datadir):
         os.makedirs(datadir)
     with open(os.path.join(datadir, "bitcoin.conf"), 'w') as f:
-        f.write("regtest=1\n");
-        f.write("rpcuser=rt\n");
-        f.write("rpcpassword=rt\n");
-        f.write("port="+str(p2p_port(n))+"\n");
-        f.write("rpcport="+str(rpc_port(n))+"\n");
-        f.write("listenonion=0\n");
+        f.write("regtest=1\n")
+        f.write("rpcuser=rt\n")
+        f.write("rpcpassword=rt\n")
+        f.write("port="+str(p2p_port(n))+"\n")
+        f.write("rpcport="+str(rpc_port(n))+"\n")
+        f.write("listenonion=0\n")
     return datadir
 
 def initialize_chain(test_dir):
@@ -131,7 +131,7 @@ def initialize_chain(test_dir):
         # Create cache directories, run bitcoinds:
         for i in range(4):
             datadir=initialize_datadir("cache", i)
-            args = [ os.getenv("BITCOIND", "bitcoind"), "-keypool=1", "-datadir="+datadir, "-discover=0" ]
+            args = [ os.getenv("BITCOIND", "bitcoind"), "-server", "-keypool=1", "-datadir="+datadir, "-discover=0" ]
             if i > 0:
                 args.append("-connect=127.0.0.1:"+str(p2p_port(0)))
             bitcoind_processes[i] = subprocess.Popen(args)
@@ -219,7 +219,7 @@ def start_node(i, dirname, extra_args=None, rpchost=None, timewait=None, binary=
     if binary is None:
         binary = os.getenv("BITCOIND", "bitcoind")
     # RPC tests still depend on free transactions
-    args = [ binary, "-datadir="+datadir, "-keypool=1", "-discover=0", "-rest", "-blockprioritysize=50000" ]
+    args = [ binary, "-datadir="+datadir, "-server", "-keypool=1", "-discover=0", "-rest", "-blockprioritysize=50000" ]
     if extra_args is not None: args.extend(extra_args)
     bitcoind_processes[i] = subprocess.Popen(args)
     devnull = open(os.devnull, "w")
@@ -407,6 +407,23 @@ def assert_raises(exc, fun, *args, **kwds):
     else:
         raise AssertionError("No exception raised")
 
+def assert_is_hex_string(string):
+    try:
+        int(string, 16)
+    except Exception as e:
+        raise AssertionError(
+            "Couldn't interpret %r as hexadecimal; raised: %s" % (string, e))
+
+def assert_is_hash_string(string, length=64):
+    if not isinstance(string, basestring):
+        raise AssertionError("Expected a string, got type %r" % type(string))
+    elif length and len(string) != length:
+        raise AssertionError(
+            "String of length %d expected; got %d" % (length, len(string)))
+    elif not re.match('[abcdef0-9]+$', string):
+        raise AssertionError(
+            "String %r contains invalid characters for a hash." % string)
+
 def satoshi_round(amount):
     return  Decimal(amount).quantize(Decimal('0.00000001'), rounding=ROUND_DOWN)
 
@@ -436,6 +453,24 @@ def create_confirmed_utxos(fee, node, count):
     utxos = node.listunspent()
     assert(len(utxos) >= count)
     return utxos
+
+def gen_return_txouts():
+    # Some pre-processing to create a bunch of OP_RETURN txouts to insert into transactions we create
+    # So we have big transactions (and therefore can't fit very many into each block)
+    # create one script_pubkey
+    script_pubkey = "6a4d0200" #OP_RETURN OP_PUSH2 512 bytes
+    for i in xrange (512):
+        script_pubkey = script_pubkey + "01"
+    # concatenate 128 txouts of above script_pubkey which we'll insert before the txout for change
+    txouts = "81"
+    for k in xrange(128):
+        # add txout value
+        txouts = txouts + "0000000000000000"
+        # add length of script_pubkey
+        txouts = txouts + "fd0402"
+        # add script_pubkey
+        txouts = txouts + script_pubkey
+    return txouts
 
 def create_lots_of_big_transactions(node, txouts, utxos, fee):
     addr = node.getnewaddress()

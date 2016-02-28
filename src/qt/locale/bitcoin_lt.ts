@@ -34,6 +34,10 @@
         <translation>Ištrinti pasirinktą adresą iš sąrašo</translation>
     </message>
     <message>
+        <source>Export the data in the current tab to a file</source>
+        <translation>Eksportuoti informaciją iš dabartinės lentelės į failą</translation>
+    </message>
+    <message>
         <source>&amp;Export</source>
         <translation>&amp;Eksportuoti</translation>
     </message>
@@ -46,6 +50,10 @@
         <translation>Pasirinkite adresą kuriam siūsite monetas</translation>
     </message>
     <message>
+        <source>Choose the address to receive coins with</source>
+        <translation>Pasirinkite adresą su kuriuo gauti monetas</translation>
+    </message>
+    <message>
         <source>C&amp;hoose</source>
         <translation>P&amp;asirinkti</translation>
     </message>
@@ -56,6 +64,14 @@
     <message>
         <source>Receiving addresses</source>
         <translation>Gaunami adresai</translation>
+    </message>
+    <message>
+        <source>These are your Bitcoin addresses for sending payments. Always check the amount and the receiving address before sending coins.</source>
+        <translation>Tai yra jūsų Bitcoin adresai mokėjimų siuntimui. Visada patikrinkite siunčiamą sumą ir gavėjo adresą prieš siųsdami monetas.</translation>
+    </message>
+    <message>
+        <source>These are your Bitcoin addresses for receiving payments. It is recommended to use a new receiving address for each transaction.</source>
+        <translation>Tai yra jūsų Bitcoin adresai mokėjimų gavimui. Rekomenduojame naudoti naujus gavimo adresus kiekvienai tranzakcijai.</translation>
     </message>
     <message>
         <source>Copy &amp;Label</source>
@@ -190,7 +206,11 @@
 </context>
 <context>
     <name>BanTableModel</name>
-    </context>
+    <message>
+        <source>Banned Until</source>
+        <translation>Užblokuotas iki</translation>
+    </message>
+</context>
 <context>
     <name>BitcoinGUI</name>
     <message>
@@ -356,6 +376,10 @@
     <message>
         <source>&amp;About Bitcoin Core</source>
         <translation>&amp;Apie Bitcoin Core</translation>
+    </message>
+    <message>
+        <source>&amp;Command-line options</source>
+        <translation>Komandinės eilutės parametrai</translation>
     </message>
     <message>
         <source>Error</source>
@@ -551,7 +575,11 @@
         <source>(no label)</source>
         <translation>(nėra žymės)</translation>
     </message>
-    </context>
+    <message>
+        <source>(change)</source>
+        <translation>(Graža)</translation>
+    </message>
+</context>
 <context>
     <name>EditAddressDialog</name>
     <message>
@@ -632,7 +660,7 @@
         <source>command-line options</source>
         <translation>komandinės eilutės parametrai</translation>
     </message>
-</context>
+    </context>
 <context>
     <name>Intro</name>
     <message>
@@ -666,8 +694,24 @@
         <translation>&amp;Pagrindinės</translation>
     </message>
     <message>
+        <source>MB</source>
+        <translation>MB</translation>
+    </message>
+    <message>
+        <source>IP address of the proxy (e.g. IPv4: 127.0.0.1 / IPv6: ::1)</source>
+        <translation>Proxy IP adresas (Pvz. IPv4: 127.0.0.1 / IPv6: ::1)</translation>
+    </message>
+    <message>
+        <source>&amp;Reset Options</source>
+        <translation>&amp;Atstatyti Parinktis</translation>
+    </message>
+    <message>
         <source>&amp;Network</source>
         <translation>&amp;Tinklas</translation>
+    </message>
+    <message>
+        <source>W&amp;allet</source>
+        <translation>Piniginė</translation>
     </message>
     <message>
         <source>Automatically open the Bitcoin client port on the router. This only works when your router supports UPnP and it is enabled.</source>
@@ -688,6 +732,18 @@
     <message>
         <source>Port of the proxy (e.g. 9050)</source>
         <translation>Tarpinio serverio preivadas (pvz, 9050)</translation>
+    </message>
+    <message>
+        <source>IPv4</source>
+        <translation>IPv4</translation>
+    </message>
+    <message>
+        <source>IPv6</source>
+        <translation>IPv6</translation>
+    </message>
+    <message>
+        <source>Tor</source>
+        <translation>Tor</translation>
     </message>
     <message>
         <source>&amp;Window</source>
@@ -742,6 +798,14 @@
         <translation>Patvirtinti nustatymų atstatymą</translation>
     </message>
     <message>
+        <source>Client restart required to activate changes.</source>
+        <translation>Kliento perkrovimas reikalingas nustatymų aktyvavimui</translation>
+    </message>
+    <message>
+        <source>This change would require a client restart.</source>
+        <translation>Šis pakeitimas reikalautų kliento perkrovimo</translation>
+    </message>
+    <message>
         <source>The supplied proxy address is invalid.</source>
         <translation>Nurodytas tarpinio serverio adresas negalioja.</translation>
     </message>
@@ -755,6 +819,10 @@
     <message>
         <source>Available:</source>
         <translation>Galimi:</translation>
+    </message>
+    <message>
+        <source>Your current spendable balance</source>
+        <translation>Jūsų dabartinis išleidžiamas balansas</translation>
     </message>
     <message>
         <source>Pending:</source>
@@ -780,8 +848,16 @@
         <translation>URI apdorojimas</translation>
     </message>
     <message>
+        <source>Invalid payment address %1</source>
+        <translation>Neteisingas mokėjimo adresas %1</translation>
+    </message>
+    <message>
         <source>Payment request rejected</source>
         <translation>Mokėjimo siuntimas atmestas</translation>
+    </message>
+    <message>
+        <source>Payment request expired.</source>
+        <translation>Mokėjimo siuntimas pasibaigė</translation>
     </message>
     <message>
         <source>Network request error</source>
@@ -813,10 +889,18 @@
 <context>
     <name>QRImageWidget</name>
     <message>
+        <source>&amp;Copy Image</source>
+        <translation>Kopijuoti nuotrauką</translation>
+    </message>
+    <message>
         <source>Save QR Code</source>
         <translation>Įrašyti QR kodą</translation>
     </message>
-    </context>
+    <message>
+        <source>PNG Image (*.png)</source>
+        <translation>PNG paveikslėlis (*.png)</translation>
+    </message>
+</context>
 <context>
     <name>RPCConsole</name>
     <message>
@@ -836,6 +920,10 @@
         <translation>&amp;Informacija</translation>
     </message>
     <message>
+        <source>Debug window</source>
+        <translation>Derinimo langas</translation>
+    </message>
+    <message>
         <source>Using OpenSSL version</source>
         <translation>Naudojama OpenSSL versija</translation>
     </message>
@@ -846,6 +934,10 @@
     <message>
         <source>Network</source>
         <translation>Tinklas</translation>
+    </message>
+    <message>
+        <source>Name</source>
+        <translation>Pavadinimas</translation>
     </message>
     <message>
         <source>Number of connections</source>
@@ -884,6 +976,10 @@
         <translation>&amp;Konsolė</translation>
     </message>
     <message>
+        <source>&amp;Clear</source>
+        <translation>Išvalyti</translation>
+    </message>
+    <message>
         <source>Totals</source>
         <translation>Viso:</translation>
     </message>
@@ -919,12 +1015,28 @@
         <source>never</source>
         <translation>Niekada</translation>
     </message>
+    <message>
+        <source>Yes</source>
+        <translation>Taip</translation>
+    </message>
+    <message>
+        <source>No</source>
+        <translation>Ne</translation>
+    </message>
     </context>
 <context>
     <name>ReceiveCoinsDialog</name>
     <message>
+        <source>&amp;Amount:</source>
+        <translation>Suma:</translation>
+    </message>
+    <message>
         <source>&amp;Label:</source>
         <translation>Ž&amp;ymė:</translation>
+    </message>
+    <message>
+        <source>&amp;Message:</source>
+        <translation>Žinutė:</translation>
     </message>
     <message>
         <source>Clear</source>
@@ -944,6 +1056,10 @@
     <message>
         <source>QR Code</source>
         <translation>QR kodas</translation>
+    </message>
+    <message>
+        <source>Copy &amp;Address</source>
+        <translation>&amp;Kopijuoti adresą</translation>
     </message>
     <message>
         <source>Payment information</source>
@@ -1000,6 +1116,10 @@
         <translation>Siųsti monetas</translation>
     </message>
     <message>
+        <source>Insufficient funds!</source>
+        <translation>Nepakanka lėšų</translation>
+    </message>
+    <message>
         <source>Quantity:</source>
         <translation>Kiekis:</translation>
     </message>
@@ -1026,6 +1146,10 @@
     <message>
         <source>Change:</source>
         <translation>Graža:</translation>
+    </message>
+    <message>
+        <source>Transaction Fee:</source>
+        <translation>Sandorio mokestis:</translation>
     </message>
     <message>
         <source>Send to multiple recipients at once</source>
@@ -1092,6 +1216,10 @@
         <translation>Jei pridedame sandorio mokestį %1 bendra suma viršija jūsų balansą.</translation>
     </message>
     <message>
+        <source>Payment request expired.</source>
+        <translation>Mokėjimo siuntimas pasibaigė</translation>
+    </message>
+    <message>
         <source>(no label)</source>
         <translation>(nėra žymės)</translation>
     </message>
@@ -1129,6 +1257,10 @@
     <message>
         <source>Message:</source>
         <translation>Žinutė:</translation>
+    </message>
+    <message>
+        <source>Pay To:</source>
+        <translation>Mokėti gavėjui:</translation>
     </message>
     </context>
 <context>
@@ -1175,6 +1307,10 @@
     <message>
         <source>Verify the message to ensure it was signed with the specified Bitcoin address</source>
         <translation>Patikrinkite žinutę, jog įsitikintumėte, kad ją pasirašė nurodytas Bitcoin adresas</translation>
+    </message>
+    <message>
+        <source>Verify &amp;Message</source>
+        <translation>&amp;Patikrinti žinutę</translation>
     </message>
     <message>
         <source>Click "Sign Message" to generate signature</source>
@@ -1571,6 +1707,10 @@
         <translation>&amp;Eksportuoti</translation>
     </message>
     <message>
+        <source>Export the data in the current tab to a file</source>
+        <translation>Eksportuoti informaciją iš dabartinės lentelės į failą</translation>
+    </message>
+    <message>
         <source>Backup Wallet</source>
         <translation>Backup piniginę</translation>
     </message>
@@ -1628,6 +1768,18 @@
     <message>
         <source>Information</source>
         <translation>Informacija</translation>
+    </message>
+    <message>
+        <source>Invalid amount for -maxtxfee=&lt;amount&gt;: '%s'</source>
+        <translation>Neteisinga suma -maxtxfee=&lt;amount&gt;: '%s'</translation>
+    </message>
+    <message>
+        <source>Invalid amount for -minrelaytxfee=&lt;amount&gt;: '%s'</source>
+        <translation>Neteisinga suma -minrelaytxfee=&lt;amount&gt;: '%s'</translation>
+    </message>
+    <message>
+        <source>Invalid amount for -mintxfee=&lt;amount&gt;: '%s'</source>
+        <translation>Neteisinga suma -mintxfee=&lt;amount&gt;: '%s'</translation>
     </message>
     <message>
         <source>Send trace/debug info to console instead of debug.log file</source>

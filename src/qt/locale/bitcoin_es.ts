@@ -23,7 +23,7 @@
     </message>
     <message>
         <source>C&amp;lose</source>
-        <translation>&amp;Cerrar</translation>
+        <translation>C&amp;errar</translation>
     </message>
     <message>
         <source>&amp;Copy Address</source>
@@ -55,7 +55,7 @@
     </message>
     <message>
         <source>C&amp;hoose</source>
-        <translation>&amp;Escoger</translation>
+        <translation>E&amp;scoger</translation>
     </message>
     <message>
         <source>Sending addresses</source>
@@ -93,7 +93,11 @@
         <source>Exporting Failed</source>
         <translation>Fallo al exportar</translation>
     </message>
-    </context>
+    <message>
+        <source>There was an error trying to save the address list to %1. Please try again.</source>
+        <translation>Hubo un error al tratar de guardar en la lista de direcciones a %1 . Por favor, vuelve a intentarlo .</translation>
+    </message>
+</context>
 <context>
     <name>AddressTableModel</name>
     <message>
@@ -259,7 +263,7 @@
     </message>
     <message>
         <source>E&amp;xit</source>
-        <translation>&amp;Salir</translation>
+        <translation>S&amp;alir</translation>
     </message>
     <message>
         <source>Quit application</source>
@@ -878,6 +882,30 @@
         <source>command-line options</source>
         <translation>opciones de la consola de comandos</translation>
     </message>
+    <message>
+        <source>UI Options:</source>
+        <translation>Opciones de interfaz de usuario:</translation>
+    </message>
+    <message>
+        <source>Choose data directory on startup (default: %u)</source>
+        <translation>Elegir directorio de datos al iniciar (predeterminado: %u)</translation>
+    </message>
+    <message>
+        <source>Set language, for example "de_DE" (default: system locale)</source>
+        <translation>Establecer el idioma, por ejemplo, "es_ES" (predeterminado: configuración regional del sistema)</translation>
+    </message>
+    <message>
+        <source>Start minimized</source>
+        <translation>Arrancar minimizado</translation>
+    </message>
+    <message>
+        <source>Set SSL root certificates for payment request (default: -system-)</source>
+        <translation>Establecer los certificados raíz SSL para solicitudes de pago (predeterminado: -system-)</translation>
+    </message>
+    <message>
+        <source>Reset all settings changes made over the GUI</source>
+        <translation>Resetear los cambios de configuracion hechos por el GUI</translation>
+    </message>
 </context>
 <context>
     <name>Intro</name>
@@ -1086,6 +1114,14 @@
     <message>
         <source>Tor</source>
         <translation>Tor</translation>
+    </message>
+    <message>
+        <source>Connect to the Bitcoin network through a separate SOCKS5 proxy for Tor hidden services.</source>
+        <translation>Conectar a la red Bitcoin mediante un proxy SOCKS5 por separado para los servicios ocultos de Tor.</translation>
+    </message>
+    <message>
+        <source>Use separate SOCKS5 proxy to reach peers via Tor hidden services:</source>
+        <translation>Usar distintos proxys SOCKS5 para comunicarse vía Tor de forma anónima:</translation>
     </message>
     <message>
         <source>&amp;Window</source>
@@ -1458,6 +1494,14 @@
         <translation>Número actual de bloques</translation>
     </message>
     <message>
+        <source>Current number of transactions</source>
+        <translation>Número actual de transacciones</translation>
+    </message>
+    <message>
+        <source>Memory usage</source>
+        <translation>Uso de memoria</translation>
+    </message>
+    <message>
         <source>Open the Bitcoin Core debug log file from the current data directory. This can take a few seconds for large log files.</source>
         <translation>Abre el archivo de registro de depuración de Bitcoin desde el directorio de datos actual. Esto puede tardar unos segundos para ficheros de registro de gran tamaño.</translation>
     </message>
@@ -1480,6 +1524,10 @@
     <message>
         <source>Select a peer to view detailed information.</source>
         <translation>Seleccionar un par para ver su información detallada.</translation>
+    </message>
+    <message>
+        <source>Whitelisted</source>
+        <translation>En la lista blanca</translation>
     </message>
     <message>
         <source>Direction</source>
@@ -1528,6 +1576,10 @@
     <message>
         <source>Ping Time</source>
         <translation>Ping</translation>
+    </message>
+    <message>
+        <source>Ping Wait</source>
+        <translation>Espera de Ping</translation>
     </message>
     <message>
         <source>Time Offset</source>
@@ -1580,6 +1632,10 @@
     <message>
         <source>&amp;Disconnect Node</source>
         <translation>Nodo &amp;Desconectado</translation>
+    </message>
+    <message>
+        <source>Ban Node for</source>
+        <translation>Prohibir Nodo para</translation>
     </message>
     <message>
         <source>1 &amp;hour</source>
@@ -2022,6 +2078,10 @@
         <translation>Copiar Cambio</translation>
     </message>
     <message>
+        <source>Total Amount %1</source>
+        <translation>Monto Total %1</translation>
+    </message>
+    <message>
         <source>or</source>
         <translation>o</translation>
     </message>
@@ -2044,6 +2104,10 @@
     <message>
         <source>The transaction was rejected! This might happen if some of the coins in your wallet were already spent, such as if you used a copy of wallet.dat and coins were spent in the copy but not marked as spent here.</source>
         <translation>¡La transacción fue rechazada! Esto puede haber ocurrido si alguno de los bitcoins de su monedero ya estaba gastado o si ha usado una copia de wallet.dat y los bitcoins estaban gastados en la copia pero no se habían marcado como gastados aqui.</translation>
+    </message>
+    <message>
+        <source>A fee higher than %1 is considered an absurdly high fee.</source>
+        <translation>Una comisión mayor al %1 se considera demasiado alta.</translation>
     </message>
     <message>
         <source>Payment request expired.</source>
@@ -2689,6 +2753,10 @@
         <translation>Copiar identificador de transacción</translation>
     </message>
     <message>
+        <source>Copy raw transaction</source>
+        <translation>Copiar traducción en crudo</translation>
+    </message>
+    <message>
         <source>Edit label</source>
         <translation>Editar etiqueta</translation>
     </message>
@@ -2838,6 +2906,10 @@
 </translation>
     </message>
     <message>
+        <source>Please check that your computer's date and time are correct! If your clock is wrong Bitcoin Core will not work properly.</source>
+        <translation>Por favor, mira si la fecha y la hora en tu computador son correctas! Si tu hara es errónea Bitcoin Core no funcionará correctamente.</translation>
+    </message>
+    <message>
         <source>Error: A fatal internal error occurred, see debug.log for details</source>
         <translation>Un error interno fatal ocurrió, ver debug.log para detalles</translation>
     </message>
@@ -2853,6 +2925,10 @@
         <source>Run in the background as a daemon and accept commands</source>
         <translation>Ejecutar en segundo plano como daemon y aceptar comandos
 </translation>
+    </message>
+    <message>
+        <source>Unable to start HTTP server. See debug log for details.</source>
+        <translation>No se ha podido comenzar el servidor HTTP. Ver debug log para detalles.</translation>
     </message>
     <message>
         <source>Accept connections from outside (default: 1 if no -proxy or -connect)</source>
@@ -3075,6 +3151,10 @@
         <translation>Si el pago de comisión no está establecido, incluir la cuota suficiente para que las transacciones comiencen la confirmación en una media de n bloques ( por defecto :%u)</translation>
     </message>
     <message>
+        <source>Invalid amount for -maxtxfee=&lt;amount&gt;: '%s' (must be at least the minrelay fee of %s to prevent stuck transactions)</source>
+        <translation>Cantidad no válida para -maxtxfee=&lt;amount&gt;: '%s' (debe ser por lo menos la cuota de comisión mínima de %s para prevenir transacciones atascadas)</translation>
+    </message>
+    <message>
         <source>Maximum size of data in data carrier transactions we relay and mine (default: %u)</source>
         <translation>El tamaño máximo de los datos en las operaciones de transporte de datos que transmitimos y el mio (default: %u)</translation>
     </message>
@@ -3278,6 +3358,10 @@
     <message>
         <source>Zapping all transactions from wallet...</source>
         <translation>Eliminando todas las transacciones del monedero...</translation>
+    </message>
+    <message>
+        <source>ZeroMQ notification options:</source>
+        <translation>Opciones de notificación ZeroQM:</translation>
     </message>
     <message>
         <source>wallet.dat corrupt, salvage failed</source>

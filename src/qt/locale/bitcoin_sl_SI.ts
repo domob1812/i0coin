@@ -427,7 +427,7 @@
     </message>
     <message numerus="yes">
         <source>%n active connection(s) to Bitcoin network</source>
-        <translation><numerusform>%n aktivna povezava v bitcoin omrežje</numerusform><numerusform>%n aktivni povezavi v bitcoin omrežje</numerusform><numerusform>%n aktivne povezave v bitcoin omrežje</numerusform><numerusform>%n aktivnih povezav v bitcoin omrežje</numerusform></translation>
+        <translation><numerusform>%n aktivna povezava v omrežje Bitcoin</numerusform><numerusform>%n aktivni povezavi v omrežje Bitcoin</numerusform><numerusform>%n aktivne povezave v omrežje Bitcoin</numerusform><numerusform>%n aktivnih povezav v omrežje Bitcoin</numerusform></translation>
     </message>
     <message>
         <source>No block source available...</source>
@@ -463,7 +463,7 @@
     </message>
     <message>
         <source>Last received block was generated %1 ago.</source>
-        <translation>Zadnji prejeti blok je bil ustvarjen %1 nazaj.</translation>
+        <translation>Zadnji prejeti blok je star %1.</translation>
     </message>
     <message>
         <source>Transactions after this will not yet be visible.</source>
@@ -874,7 +874,7 @@
         <source>command-line options</source>
         <translation>možnosti ukazne vrstice</translation>
     </message>
-</context>
+    </context>
 <context>
     <name>Intro</name>
     <message>
@@ -917,7 +917,11 @@
         <source>%n GB of free space available</source>
         <translation><numerusform>%n GiB prostega prostora na voljo</numerusform><numerusform>%n GiB prostega prostora na voljo</numerusform><numerusform>%n GiB prostega prostora na voljo</numerusform><numerusform>%n GiB prostega prostora na voljo</numerusform></translation>
     </message>
-    </context>
+    <message numerus="yes">
+        <source>(of %n GB needed)</source>
+        <translation><numerusform>(od potrebnih %n GiB)</numerusform><numerusform>(od potrebnih %n GiB)</numerusform><numerusform>(od potrebnih %n GiB)</numerusform><numerusform>(od potrebnih %n GiB)</numerusform></translation>
+    </message>
+</context>
 <context>
     <name>OpenURIDialog</name>
     <message>
@@ -1066,6 +1070,10 @@
     <message>
         <source>Port of the proxy (e.g. 9050)</source>
         <translation>Vrata posredniškega strežnika (npr. 9050)</translation>
+    </message>
+    <message>
+        <source>Use separate SOCKS5 proxy to reach peers via Tor hidden services:</source>
+        <translation>Za dostop do soležnikov preko skritih storitev Tor uporabi drug posredniški strežnik SOCKS5:</translation>
     </message>
     <message>
         <source>&amp;Window</source>
@@ -1314,7 +1322,7 @@
     </message>
     <message>
         <source>Node/Service</source>
-        <translation>Vozlišče/Storitev</translation>
+        <translation>Naslov</translation>
     </message>
     <message>
         <source>Ping Time</source>
@@ -2429,7 +2437,7 @@
     </message>
     <message numerus="yes">
         <source>Open for %n more block(s)</source>
-        <translation><numerusform>Odprto še %n blok</numerusform><numerusform>Odprto še %n bloka</numerusform><numerusform>Odprto še %n bloke</numerusform><numerusform>Odprto še %n blokov</numerusform></translation>
+        <translation><numerusform>Še %n blok do potrditve</numerusform><numerusform>Še %n bloka do potrditve</numerusform><numerusform>Še %n bloki do potrditve</numerusform><numerusform>Še %n blokov do potrditve</numerusform></translation>
     </message>
     <message>
         <source>unknown</source>
@@ -2463,7 +2471,7 @@
     </message>
     <message numerus="yes">
         <source>Open for %n more block(s)</source>
-        <translation><numerusform>Odprto še %n blok</numerusform><numerusform>Odprto še %n bloka</numerusform><numerusform>Odprto še %n bloke</numerusform><numerusform>Odprto še %n blokov</numerusform></translation>
+        <translation><numerusform>Še %n blok do potrditve</numerusform><numerusform>Še %n bloka do potrditve</numerusform><numerusform>Še %n bloki do potrditve</numerusform><numerusform>Še %n blokov do potrditve</numerusform></translation>
     </message>
     <message>
         <source>Open until %1</source>
@@ -3001,7 +3009,7 @@
     </message>
     <message>
         <source>Activating best chain...</source>
-        <translation>Preklapljam na najboljšo verigo ...</translation>
+        <translation>Prehajam na najboljšo verigo ...</translation>
     </message>
     <message>
         <source>Cannot resolve -whitebind address: '%s'</source>
@@ -3018,6 +3026,18 @@
     <message>
         <source>Information</source>
         <translation>Informacije</translation>
+    </message>
+    <message>
+        <source>Invalid amount for -maxtxfee=&lt;amount&gt;: '%s'</source>
+        <translation>Neveljavna količina za -maxtxfee=&lt;amount&gt;: '%s'</translation>
+    </message>
+    <message>
+        <source>Invalid amount for -minrelaytxfee=&lt;amount&gt;: '%s'</source>
+        <translation>Neveljavna količina za -minrelaytxfee=&lt;amount&gt;: '%s'</translation>
+    </message>
+    <message>
+        <source>Invalid amount for -mintxfee=&lt;amount&gt;: '%s'</source>
+        <translation>Neveljavna količina za -mintxfee=&lt;amount&gt;: '%s'</translation>
     </message>
     <message>
         <source>Need to specify a port with -whitebind: '%s'</source>
