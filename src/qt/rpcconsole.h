@@ -25,7 +25,7 @@ class QMenu;
 class QItemSelection;
 QT_END_NAMESPACE
 
-/** Local Bitcoin RPC console. */
+/** Local I0coin RPC console. */
 class RPCConsole: public QWidget
 {
     Q_OBJECT
